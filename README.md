@@ -2,7 +2,7 @@
 
 **Automated Weekly County Weather Reporting System for Kenya**
 
-Clima scope is an automated weather reporting system that generates comprehensive weekly county-level weather forecasts and reports for all 47 Kenyan counties. The system processes GFS (Global Forecast System) 7-day forecast data, performs spatial aggregation to ward-level, and generates professional PDF reports with integrated geospatial visualizations.
+Clima-scope is an automated weather reporting system that generates comprehensive weekly county-level weather forecasts and reports for all 47 Kenyan counties. The system processes GFS (Global Forecast System) 7-day forecast data, performs spatial aggregation to ward-level, and generates professional PDF reports with integrated geospatial visualizations.
 
 ---
 
