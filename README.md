@@ -231,33 +231,6 @@ Test files:
 ---
 
 
-### ✅ Completed (Person B Tasks)
-
-- [x] **Report Structure & Sections** - Complete 11-section specification
-- [x] **Data Interfaces & Schemas** - Comprehensive input/output schemas
-- [x] **JSON Schema Definition** - Draft 7 compliant schema
-- [x] **Map Embedding Strategy** - PDF and web embedding specifications
-- [x] **TypeScript Type Safety** - Strict typing throughout
-- [x] **Testing Infrastructure** - Vitest setup with test coverage
-
-### 🚧 In Progress
-
-- [ ] **PDF Generation** - Backend implementation
-- [ ] **CSV Export** - Backend implementation
-- [ ] **Map Generation** - Geospatial visualization pipeline
-- [ ] **API Integration** - Backend service integration
-- [ ] **UI Updates** - Connect frontend to backend APIs
-
-### 📋 Planned
-
-- [ ] **Backend Service** - Python FastAPI service
-- [ ] **Automated Scheduling** - Weekly report generation
-- [ ] **Email Distribution** - Automated report delivery
-- [ ] **Historical Data** - Report archive and comparison
-- [ ] **Multi-language** - Swahili translation support
-
----
-
 ## 🏗️ Architecture
 
 ### Frontend (Current)
