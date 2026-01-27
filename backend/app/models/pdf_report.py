@@ -4,7 +4,7 @@ PDF Report Model
 Stores metadata about generated PDF files.
 """
 
-from sqlalchemy import Column, String, Integer, ForeignKey, DateTime, Text, Index, BigInteger
+from sqlalchemy import Column, String, Integer, ForeignKey, DateTime, Text, BigInteger
 from sqlalchemy.orm import relationship
 from datetime import datetime
 
@@ -51,12 +51,12 @@ class PDFReport(Base):
     # Relationships
     complete_report = relationship("CompleteReport", back_populates="pdf_reports")
     
-    # Indexes
-    __table_args__ = (
-        Index("idx_pdf_report_complete_report", "complete_report_id"),
-        Index("idx_pdf_report_generated", "generated_at"),
-        Index("idx_pdf_report_status", "is_available"),
-    )
+    # Note: Single-column indexes are defined inline with index=True on the columns.
+    # Composite indexes can be added here if needed for multi-column queries.
+    # If adding composite indexes, import Index: from sqlalchemy import Index
+    # __table_args__ = (
+    #     Index("idx_pdf_report_complete_report_generated", "complete_report_id", "generated_at"),
+    # )
     
     def __repr__(self):
         return f"<PDFReport(id={self.id}, file_name={self.file_name}, complete_report_id={self.complete_report_id})>"
