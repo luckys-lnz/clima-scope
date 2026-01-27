@@ -1,0 +1,202 @@
+# PDF Generator Module - Clima-scope
+
+Standalone PDF report generation module for Clima-scope automated weather reports.
+
+## Overview
+
+This module generates professional PDF reports from structured JSON data matching the `CompleteWeatherReport` TypeScript interface. It can work independently with mock data or be integrated into the backend service.
+
+## Structure
+
+```
+pdf_generator/
+├── __init__.py
+├── models.py              # Pydantic models matching TypeScript interfaces
+├── pdf_builder.py        # Main PDF generation class
+├── section_generators.py # Individual section generators
+├── narrative_generator.py # Narrative text generation
+├── utils.py              # Utility functions (formatting, validation)
+├── config.py             # Configuration (fonts, colors, page sizes)
+├── sample_data/          # Sample JSON data for testing
+│   └── nairobi_sample.json
+└── tests/                # Unit tests
+    └── test_pdf_builder.py
+```
+
+## Installation
+
+### Quick Setup (Recommended)
+
+**Linux/macOS:**
+```bash
+cd pdf_generator
+./setup_venv.sh
+```
+
+**Windows:**
+```cmd
+cd pdf_generator
+setup_venv.bat
+```
+
+### Manual Setup
+
+See [INSTALLATION.md](INSTALLATION.md) for detailed installation instructions.
+
+**Basic installation:**
+```bash
+cd pdf_generator
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install --upgrade pip
+pip install -r requirements.txt
+pip install -e .
+```
+
+**With development tools:**
+```bash
+pip install -r requirements-dev.txt
+```
+
+**With Anthropic support:**
+```bash
+pip install -r requirements-anthropic.txt
+```
+
+## Usage
+
+### Basic Usage
+
+```python
+from pdf_generator.pdf_builder import PDFReportBuilder
+import json
+
+# Load report data
+with open('sample_data/nairobi_sample.json', 'r') as f:
+    report_data = json.load(f)
+
+# Generate PDF
+builder = PDFReportBuilder(report_data)
+pdf_path = builder.generate('output/nairobi_report.pdf')
+print(f"PDF generated: {pdf_path}")
+```
+
+### With Custom Configuration
+
+```python
+from pdf_generator.pdf_builder import PDFReportBuilder
+from pdf_generator.config import ReportConfig
+
+config = ReportConfig(
+    page_size='A4',
+    language='en',
+    include_observations=False
+)
+
+builder = PDFReportBuilder(report_data, config=config)
+pdf_path = builder.generate('output/report.pdf')
+```
+
+## Report Sections
+
+The PDF includes all 11 sections as specified:
+
+1. **Cover Page** - Title, county, period, metadata
+2. **Executive Summary** - Key statistics and highlights
+3. **Weekly Narrative Summary** - Overview narrative
+4. **Rainfall Outlook** - Rainfall data, maps, analysis
+5. **Temperature Outlook** - Temperature data, maps, analysis
+6. **Wind Outlook** - Wind data, maps, analysis
+7. **Ward-Level Visualizations** - Full-page maps
+8. **Extreme Values and Highlights** - Extreme events and risks
+9. **Impacts and Advisories** - Sector-specific guidance
+10. **Data Sources and Methodology** - Technical details
+11. **Metadata and Disclaimers** - Legal and contact info
+
+## Input Data Format
+
+The module expects JSON matching the TypeScript `CompleteWeatherReport` interface. See `sample_data/nairobi_sample.json` for an example.
+
+## Development
+
+### Running Tests
+
+```bash
+pytest tests/
+```
+
+### Generating Sample PDF
+
+```bash
+python -m pdf_generator.generate_sample
+```
+
+## Integration with Backend
+
+This module is designed to be easily integrated into the FastAPI backend:
+
+```python
+# In app/services/report_generator.py
+from pdf_generator.pdf_builder import PDFReportBuilder
+
+def generate_pdf_report(report_data: dict) -> str:
+    builder = PDFReportBuilder(report_data)
+    output_path = f"storage/reports/{report_data['coverPage']['county']['code']}_{date}.pdf"
+    return builder.generate(output_path)
+```
+
+## AI-Powered Report Generation
+
+The module now includes AI-powered report generation using OpenAI or Anthropic APIs.
+
+### Quick Start with AI
+
+1. **Set up API key** (see `API_KEY_SETUP.md` for detailed instructions):
+   ```bash
+   export OPENAI_API_KEY="sk-your-api-key-here"
+   # OR
+   export ANTHROPIC_API_KEY="sk-ant-your-api-key-here"
+   ```
+
+2. **Install dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. **Generate AI-powered report**:
+   ```bash
+   python -m pdf_generator.generate_ai_sample
+   ```
+
+### Using the AI Service
+
+```python
+from pdf_generator.report_generator import ReportGenerator
+from pdf_generator.ai_service import AIProvider
+from pdf_generator.enhanced_pdf_builder import EnhancedPDFBuilder
+
+# Generate complete report from raw data
+generator = ReportGenerator(ai_provider=AIProvider.OPENAI)
+complete_report = generator.generate_complete_report(raw_weather_data)
+
+# Generate enhanced PDF
+pdf_builder = EnhancedPDFBuilder(complete_report)
+pdf_path = pdf_builder.generate("output/report.pdf")
+```
+
+### Features
+
+- **AI-Generated Content**: Professional narrative sections generated by GPT-4 or Claude
+- **Enhanced Formatting**: Improved PDF layout with tables, proper spacing, and professional styling
+- **Structured Output**: Automatically transforms raw weather data into complete report structure
+- **Multiple Providers**: Support for both OpenAI and Anthropic APIs
+
+## Status
+
+- ✅ Module structure
+- ✅ Data models
+- ✅ Section generators
+- ✅ PDF builder
+- ✅ AI-powered report generation
+- ✅ Enhanced PDF formatting
+- ⏳ Testing

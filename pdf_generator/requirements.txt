@@ -1,0 +1,31 @@
+# PDF Generation Dependencies for Clima-scope
+
+# Core PDF generation
+reportlab>=4.0.0
+# Note: renderPM is optional and may not build on Python 3.14+
+# It's only needed for advanced image rendering features
+# reportlab[renderPM]>=4.0.0  # Uncomment if needed and compatible with your Python version
+
+# Image handling
+Pillow>=10.0.0
+
+# Data validation and models
+pydantic>=2.9.0
+
+# Date/time handling
+python-dateutil>=2.9.0
+
+# AI/LLM dependencies (choose one provider)
+openai>=1.0.0
+# OR uncomment the line below if using Anthropic instead:
+# anthropic>=0.18.0
+
+# Environment variable loading
+python-dotenv>=1.0.0
+
+# Optional: For charts/graphs if needed
+matplotlib>=3.8.0
+
+# Development dependencies
+pytest>=8.0.0
+pytest-cov>=4.1.0
