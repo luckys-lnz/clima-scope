@@ -1,0 +1,8 @@
+# Requirements for using Anthropic instead of OpenAI
+# Install with: pip install -r requirements-anthropic.txt
+
+# Include base requirements
+-r requirements.txt
+
+# Anthropic SDK
+anthropic>=0.18.0
