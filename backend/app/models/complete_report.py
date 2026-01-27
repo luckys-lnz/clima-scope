@@ -55,7 +55,7 @@ class CompleteReport(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     
     # Relationships
-    weather_report = relationship("WeatherReport", back_populates="complete_reports")
+    weather_report = relationship("WeatherReport", back_populates="complete_report")
     county = relationship("County")
     pdf_reports = relationship("PDFReport", back_populates="complete_report", cascade="all, delete-orphan")
     

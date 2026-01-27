@@ -52,7 +52,7 @@ class WeatherReport(Base):
     
     # Relationships
     county = relationship("County", back_populates="weather_reports")
-    complete_reports = relationship("CompleteReport", back_populates="weather_report", cascade="all, delete-orphan")
+    complete_report = relationship("CompleteReport", back_populates="weather_report", uselist=False, cascade="all, delete-orphan")
     
     # Indexes for common queries
     __table_args__ = (
