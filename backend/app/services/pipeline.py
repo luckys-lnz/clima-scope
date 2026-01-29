@@ -167,8 +167,14 @@ class PipelineExecution:
 class PipelineService:
     """Service for orchestrating report generation pipelines."""
     
-    def __init__(self):
-        """Initialize pipeline service."""
+    def __init__(self, db: Optional[Session] = None):
+        """
+        Initialize pipeline service.
+        
+        Args:
+            db: Optional database session for operations that need it
+        """
+        self.db = db
         self.map_storage = MapStorageService()
         
         # In-memory store for active pipelines
@@ -314,7 +320,7 @@ class PipelineService:
                     period_start=execution.period_start,
                     period_end=execution.period_end,
                     raw_data=json.dumps(execution.raw_data),
-                    status="processed"
+                    processed=True
                 )
                 db.add(weather_report)
                 db.commit()
