@@ -65,49 +65,110 @@ Clima-scope is an automated weather reporting system that generates comprehensiv
 
 ```
 clima-scope/
-├── app/                    # Next.js app directory
+├── app/                    # Next.js frontend application
 │   ├── dashboard/          # Dashboard pages
 │   ├── sign-in/            # Authentication pages
-│   ├── sign-up/
-│   ├── layout.tsx          # Root layout
-│   └── page.tsx           # Landing page
+│   └── *.tsx               # Pages and layouts
 │
-├── components/             # React components
-│   ├── screens/           # Screen components
-│   ├── ui/                # shadcn/ui components
-│   └── *.tsx              # Shared components
+├── backend/                # FastAPI backend server
+│   ├── app/                # Backend application code
+│   │   ├── api/v1/         # API route handlers
+│   │   ├── models/         # Database models
+│   │   ├── schemas/        # Request/response schemas
+│   │   └── services/       # Business logic
+│   ├── resources/          # Backend resources
+│   │   └── sample_data/    # Sample JSON data files
+│   ├── tests/              # Backend tests
+│   └── README.md           # Backend documentation
 │
-├── lib/                    # Core libraries
-│   ├── __tests__/         # Unit tests
-│   ├── data-interfaces.ts # Data interface definitions
-│   ├── json-schema.ts     # JSON schema implementation
-│   ├── map-embedding.ts   # Map embedding strategy
+├── pdf_generator/          # PDF generation module
+│   ├── docs/               # PDF generator documentation
+│   ├── sample_data/        # Sample report data
+│   └── *.py                # PDF generation code
+│
+├── components/             # React UI components
+│   ├── screens/            # Screen components
+│   ├── ui/                 # shadcn/ui components
+│   └── *.tsx               # Shared components
+│
+├── lib/                    # Core TypeScript libraries
+│   ├── __tests__/          # Unit tests
+│   ├── data-interfaces.ts  # Data interface definitions
+│   ├── json-schema.ts      # JSON schema implementation
+│   ├── map-embedding.ts    # Map embedding strategy
 │   ├── report-structure.ts # Report structure definitions
-│   └── weather-schemas.ts # Weather data schemas
+│   └── weather-schemas.ts  # Weather data schemas
 │
 ├── docs/                   # Documentation
+│   ├── backend/            # Backend documentation
+│   │   ├── phases/         # Implementation phase summaries
+│   │   ├── MIGRATIONS.md   # Database migrations guide
+│   │   ├── STRUCTURE.md    # Backend architecture
+│   │   └── TESTING.md      # Backend testing guide
+│   ├── internal/           # Internal docs & reviews
+│   │   ├── reviews/        # Code reviews & task summaries
+│   │   └── plans/          # Development plans
 │   ├── REPORT_STRUCTURE_SPECIFICATION.md
 │   ├── DATA_INTERFACES_SPECIFICATION.md
 │   ├── JSON_SCHEMA_SPECIFICATION.md
 │   ├── MAP_EMBEDDING_STRATEGY.md
-│   └── *.md               # Additional documentation
+│   └── *.md                # Additional specifications
 │
 ├── schemas/                # JSON schemas
 │   └── county-weather-report.schema.json
 │
 ├── scripts/                # Utility scripts
-│   └── validate-schemas.ts
+│   ├── validate-schemas.ts # TypeScript schema validator
+│   └── validate_schema.py  # Python schema validator
 │
-└── public/                # Static assets
+└── public/                 # Static assets
 ```
+
+## 📚 Documentation Map
+
+### For Users
+- [README.md](README.md) - This file (project overview)
+- [docs/REPORT_STRUCTURE_SPECIFICATION.md](docs/REPORT_STRUCTURE_SPECIFICATION.md) - Report format specification
+- [backend/README.md](backend/README.md) - Backend API setup and usage
+- [pdf_generator/README.md](pdf_generator/README.md) - PDF generator module
+- [pdf_generator/docs/QUICKSTART.md](pdf_generator/docs/QUICKSTART.md) - Quick start guide for PDF generation
+
+### For Developers
+- [docs/DATA_INTERFACES_SPECIFICATION.md](docs/DATA_INTERFACES_SPECIFICATION.md) - Data flow and interfaces
+- [docs/JSON_SCHEMA_SPECIFICATION.md](docs/JSON_SCHEMA_SPECIFICATION.md) - JSON schema details
+- [docs/backend/STRUCTURE.md](docs/backend/STRUCTURE.md) - Backend architecture
+- [docs/backend/MIGRATIONS.md](docs/backend/MIGRATIONS.md) - Database migrations
+- [docs/backend/TESTING.md](docs/backend/TESTING.md) - Testing guide
+- [docs/BACKEND_API_IMPLEMENTATION_PLAN.md](docs/BACKEND_API_IMPLEMENTATION_PLAN.md) - API development plan
+
+### Internal Documentation
+- [docs/internal/reviews/](docs/internal/reviews/) - Code reviews and task summaries
+- [docs/internal/plans/](docs/internal/plans/) - Development plans and implementation strategies
 
 ---
 
 ## 🚀 Getting Started
 
+### Quick Start: Generate a PDF Report
+
+The easiest way to generate a PDF report:
+
+```bash
+# Interactive mode - choose what you want to do
+./generate_pdf.sh
+
+# Or directly:
+./generate_pdf.sh basic    # Generate basic PDF (no API key needed)
+./generate_pdf.sh ai       # Generate AI-powered PDF (requires API key)
+./generate_pdf.sh test     # Test API key configuration
+```
+
+See [IMPORT_ISSUES_GUIDE.md](IMPORT_ISSUES_GUIDE.md) for detailed usage instructions.
+
 ### Prerequisites
 - Node.js 18+ 
 - npm or pnpm
+- Python 3.8+ (for PDF generation and backend)
 
 ### Installation
 

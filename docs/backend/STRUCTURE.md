@@ -49,7 +49,9 @@ backend/
 ├── .env.example                 # Environment variables template
 ├── .gitignore                   # Git ignore rules
 ├── README.md                    # Backend documentation
-└── STRUCTURE.md                 # This file
+└── docs/
+    └── backend/
+        └── STRUCTURE.md         # This file
 ```
 
 ## Files Created

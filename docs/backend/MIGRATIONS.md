@@ -4,35 +4,52 @@ This guide explains how to work with Alembic database migrations in the Clima-sc
 
 ## Initial Setup
 
-### 1. Create Initial Migration
+### Migration Status
 
-After creating new models, generate the initial migration:
+✅ **Initial migration created and applied**: `51a197e31725_initial_migration_create_tables.py`
+
+The database is now under Alembic version control. All future schema changes should be made through migrations.
+
+### For New Developers
+
+If you're setting up a fresh database:
 
 ```bash
 cd backend
-source venv/bin/activate  # Activate virtual environment
-alembic revision --autogenerate -m "Initial migration: create tables"
+source venv/bin/activate
+
+# Apply all migrations
+alembic upgrade head
+
+# Seed reference data (counties)
+python scripts/seed_counties.py
 ```
 
-This will create a migration file in `alembic/versions/` that includes all table creation statements.
+### Creating New Migrations
 
-### 2. Review Migration
+After modifying database models:
+
+```bash
+cd backend
+source venv/bin/activate
+alembic revision --autogenerate -m "Description of changes"
+```
 
 **Always review the generated migration file** before applying it. Alembic's autogenerate is good but not perfect.
 
 Check the file in `alembic/versions/` and verify:
-- All tables are created correctly
+- All changes are captured correctly
 - Foreign keys are set up properly
 - Indexes are included
 - Column types match your models
 
-### 3. Apply Migration
+### Apply Migrations
 
 ```bash
 alembic upgrade head
 ```
 
-This will create all tables in your database.
+This will apply all pending migrations to your database.
 
 ## Common Commands
 

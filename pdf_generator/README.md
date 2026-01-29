@@ -41,7 +41,7 @@ setup_venv.bat
 
 ### Manual Setup
 
-See [INSTALLATION.md](INSTALLATION.md) for detailed installation instructions.
+See [INSTALLATION.md](docs/INSTALLATION.md) for detailed installation instructions.
 
 **Basic installation:**
 ```bash
@@ -116,6 +116,20 @@ The PDF includes all 11 sections as specified:
 ## Input Data Format
 
 The module expects JSON matching the TypeScript `CompleteWeatherReport` interface. See `sample_data/nairobi_sample.json` for an example.
+
+## Documentation
+
+Comprehensive documentation is available in the [docs/](docs/) directory:
+
+- [QUICKSTART.md](docs/QUICKSTART.md) - Quick start guide (5-minute setup)
+- [INSTALLATION.md](docs/INSTALLATION.md) - Detailed installation instructions
+- [API_KEY_SETUP.md](docs/API_KEY_SETUP.md) - API key configuration guide
+- [AI_INTEGRATION_SUMMARY.md](docs/AI_INTEGRATION_SUMMARY.md) - Overview of AI integration
+- [QUOTA_ISSUES.md](docs/QUOTA_ISSUES.md) - Resolving API quota issues
+- [PYTHON_VERSION_NOTES.md](docs/PYTHON_VERSION_NOTES.md) - Python compatibility notes
+- [INSTALLATION_TROUBLESHOOTING.md](docs/INSTALLATION_TROUBLESHOOTING.md) - Installation troubleshooting
+- [PACKAGE_STRUCTURE.md](docs/PACKAGE_STRUCTURE.md) - Package structure documentation
+- [IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) - Implementation status
 
 ## Development
 

@@ -33,11 +33,15 @@ app.add_middleware(
 )
 
 # Include API routers
-# TODO: Add routers as they are created
-# from .api.v1 import reports, counties, health
-# app.include_router(health.router, prefix="/api/v1", tags=["health"])
-# app.include_router(counties.router, prefix="/api/v1", tags=["counties"])
-# app.include_router(reports.router, prefix="/api/v1", tags=["reports"])
+from .api.v1 import health, counties, reports, pdf, maps, pipeline, uploads
+
+app.include_router(health.router, prefix=f"{settings.API_V1_PREFIX}/health", tags=["health"])
+app.include_router(counties.router, prefix=f"{settings.API_V1_PREFIX}/counties", tags=["counties"])
+app.include_router(reports.router, prefix=f"{settings.API_V1_PREFIX}/reports", tags=["reports"])
+app.include_router(pdf.router, prefix=f"{settings.API_V1_PREFIX}/pdf", tags=["pdf"])
+app.include_router(maps.router, prefix=f"{settings.API_V1_PREFIX}/maps", tags=["maps"])
+app.include_router(pipeline.router, prefix=f"{settings.API_V1_PREFIX}/pipeline", tags=["pipeline"])
+app.include_router(uploads.router, prefix=f"{settings.API_V1_PREFIX}/uploads", tags=["uploads"])
 
 
 @app.on_event("startup")

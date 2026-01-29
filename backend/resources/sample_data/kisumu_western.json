@@ -1,0 +1,175 @@
+{
+  "schema_version": "1.0",
+  "county_id": "42",
+  "county_name": "Kisumu",
+  "period": {
+    "start": "2026-01-27",
+    "end": "2026-02-02",
+    "week_number": 5,
+    "year": 2026
+  },
+  "variables": {
+    "temperature": {
+      "weekly": {
+        "mean": 25.2,
+        "max": 29.8,
+        "min": 18.5
+      },
+      "daily": [28.5, 29.2, 29.8, 29.1, 28.3, 27.8, 28.1],
+      "daily_min": [18.5, 19.2, 19.8, 19.5, 18.9, 18.7, 19.1],
+      "daily_mean": [24.5, 25.2, 25.8, 25.3, 24.6, 24.3, 24.6],
+      "units": "°C",
+      "anomaly": 0.3
+    },
+    "rainfall": {
+      "weekly": {
+        "total": 68.5,
+        "max_intensity": 22.3,
+        "rainy_days": 5
+      },
+      "daily": [8.5, 15.2, 22.3, 18.7, 3.8, 0.0, 0.0],
+      "units": "mm",
+      "probability_above_normal": 72.0
+    },
+    "wind": {
+      "weekly": {
+        "mean_speed": 9.8,
+        "max_gust": 21.5,
+        "dominant_direction": "W"
+      },
+      "units": "km/h",
+      "daily_peak": [12.5, 15.8, 21.5, 18.2, 14.3, 11.7, 10.5],
+      "daily_direction": ["W", "W", "SW", "W", "W", "NW", "W"]
+    }
+  },
+  "wards": [
+    {
+      "ward_id": "4201",
+      "ward_name": "Kisumu Central",
+      "rainfall_total": 65.3,
+      "temp_max": 29.5,
+      "temp_min": 19.1,
+      "temp_mean": 25.3,
+      "wind_max": 20.8,
+      "wind_mean": 9.5,
+      "grid_points_used": 7,
+      "quality_flag": "good"
+    },
+    {
+      "ward_id": "4202",
+      "ward_name": "Kisumu East",
+      "rainfall_total": 72.8,
+      "temp_max": 30.2,
+      "temp_min": 18.2,
+      "temp_mean": 25.7,
+      "wind_max": 22.5,
+      "wind_mean": 10.3,
+      "grid_points_used": 9,
+      "quality_flag": "good"
+    },
+    {
+      "ward_id": "4203",
+      "ward_name": "Kisumu West",
+      "rainfall_total": 64.7,
+      "temp_max": 29.1,
+      "temp_min": 19.5,
+      "temp_mean": 24.8,
+      "wind_max": 20.2,
+      "wind_mean": 9.2,
+      "grid_points_used": 6,
+      "quality_flag": "good"
+    },
+    {
+      "ward_id": "4204",
+      "ward_name": "Seme",
+      "rainfall_total": 70.2,
+      "temp_max": 29.8,
+      "temp_min": 18.8,
+      "temp_mean": 25.1,
+      "wind_max": 21.8,
+      "wind_mean": 9.9,
+      "grid_points_used": 8,
+      "quality_flag": "good"
+    },
+    {
+      "ward_id": "4205",
+      "ward_name": "Nyando",
+      "rainfall_total": 74.5,
+      "temp_max": 30.5,
+      "temp_min": 17.8,
+      "temp_mean": 25.9,
+      "wind_max": 23.1,
+      "wind_mean": 10.5,
+      "grid_points_used": 10,
+      "quality_flag": "good"
+    }
+  ],
+  "extremes": {
+    "highest_rainfall": {
+      "ward_id": "4205",
+      "ward_name": "Nyando",
+      "value": 74.5,
+      "days": [2, 3]
+    },
+    "lowest_rainfall": {
+      "ward_id": "4203",
+      "ward_name": "Kisumu West",
+      "value": 64.7
+    },
+    "hottest_ward": {
+      "ward_id": "4205",
+      "ward_name": "Nyando",
+      "value": 30.5,
+      "day": 2
+    },
+    "coolest_ward": {
+      "ward_id": "4205",
+      "ward_name": "Nyando",
+      "value": 17.8,
+      "day": 0
+    },
+    "windiest_ward": {
+      "ward_id": "4205",
+      "ward_name": "Nyando",
+      "value": 23.1
+    },
+    "flood_risk_wards": [
+      {
+        "ward_id": "4205",
+        "ward_name": "Nyando",
+        "risk_level": "high",
+        "total_rainfall": 74.5
+      },
+      {
+        "ward_id": "4202",
+        "ward_name": "Kisumu East",
+        "risk_level": "moderate",
+        "total_rainfall": 72.8
+      },
+      {
+        "ward_id": "4204",
+        "ward_name": "Seme",
+        "risk_level": "moderate",
+        "total_rainfall": 70.2
+      }
+    ]
+  },
+  "metadata": {
+    "data_source": "GFS",
+    "model_run": "2026-01-27T00:00:00Z",
+    "generated": "2026-01-27T03:35:00Z",
+    "aggregation_method": "point-in-polygon",
+    "grid_resolution": "0.25°",
+    "grid_points_used": 40,
+    "warnings": ["High rainfall expected - monitor flood-prone areas especially Nyando ward"],
+    "system_version": "1.0.0",
+    "processing_duration_seconds": 13.2
+  },
+  "disclaimer": "This forecast is generated from GFS model data and is for planning purposes only. Contact Kenya Meteorological Department for official forecasts and warnings.",
+  "quality_flags": {
+    "overall_quality": "good",
+    "missing_data_percent": 0.0,
+    "spatial_coverage_percent": 100.0,
+    "warnings": ["High rainfall and flood risk in multiple wards"]
+  }
+}

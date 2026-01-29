@@ -55,7 +55,7 @@ class AIService:
                 raise ValueError(
                     "OPENAI_API_KEY environment variable not set. "
                     "Please set it or pass api_key parameter. "
-                    "See API_KEY_SETUP.md for instructions."
+                    "See pdf_generator/docs/API_KEY_SETUP.md for instructions."
                 )
             return key
         elif self.provider == AIProvider.ANTHROPIC:
@@ -64,7 +64,7 @@ class AIService:
                 raise ValueError(
                     "ANTHROPIC_API_KEY environment variable not set. "
                     "Please set it or pass api_key parameter. "
-                    "See API_KEY_SETUP.md for instructions."
+                    "See pdf_generator/docs/API_KEY_SETUP.md for instructions."
                 )
             return key
         else:

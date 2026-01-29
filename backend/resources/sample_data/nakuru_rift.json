@@ -1,0 +1,169 @@
+{
+  "schema_version": "1.0",
+  "county_id": "32",
+  "county_name": "Nakuru",
+  "period": {
+    "start": "2026-01-27",
+    "end": "2026-02-02",
+    "week_number": 5,
+    "year": 2026
+  },
+  "variables": {
+    "temperature": {
+      "weekly": {
+        "mean": 19.8,
+        "max": 24.5,
+        "min": 12.8
+      },
+      "daily": [23.5, 24.1, 24.5, 23.8, 22.9, 22.3, 22.7],
+      "daily_min": [12.8, 13.5, 14.1, 13.8, 13.2, 12.9, 13.3],
+      "daily_mean": [18.9, 19.8, 20.3, 19.8, 18.8, 18.2, 18.6],
+      "units": "°C",
+      "anomaly": -0.5
+    },
+    "rainfall": {
+      "weekly": {
+        "total": 52.8,
+        "max_intensity": 18.5,
+        "rainy_days": 6
+      },
+      "daily": [3.2, 8.7, 18.5, 12.3, 6.8, 2.1, 1.2],
+      "units": "mm",
+      "probability_above_normal": 65.0
+    },
+    "wind": {
+      "weekly": {
+        "mean_speed": 11.2,
+        "max_gust": 24.5,
+        "dominant_direction": "E"
+      },
+      "units": "km/h",
+      "daily_peak": [15.3, 18.9, 24.5, 21.2, 17.8, 14.5, 13.7],
+      "daily_direction": ["E", "E", "SE", "E", "E", "NE", "E"]
+    }
+  },
+  "wards": [
+    {
+      "ward_id": "3201",
+      "ward_name": "Nakuru East",
+      "rainfall_total": 48.5,
+      "temp_max": 24.2,
+      "temp_min": 13.2,
+      "temp_mean": 19.5,
+      "wind_max": 23.8,
+      "wind_mean": 10.8,
+      "grid_points_used": 9,
+      "quality_flag": "good"
+    },
+    {
+      "ward_id": "3202",
+      "ward_name": "Nakuru West",
+      "rainfall_total": 51.3,
+      "temp_max": 24.0,
+      "temp_min": 12.5,
+      "temp_mean": 19.2,
+      "wind_max": 24.1,
+      "wind_mean": 11.0,
+      "grid_points_used": 8,
+      "quality_flag": "good"
+    },
+    {
+      "ward_id": "3203",
+      "ward_name": "Gilgil",
+      "rainfall_total": 58.2,
+      "temp_max": 23.8,
+      "temp_min": 12.1,
+      "temp_mean": 18.9,
+      "wind_max": 25.8,
+      "wind_mean": 11.8,
+      "grid_points_used": 11,
+      "quality_flag": "good"
+    },
+    {
+      "ward_id": "3204",
+      "ward_name": "Naivasha",
+      "rainfall_total": 54.7,
+      "temp_max": 25.1,
+      "temp_min": 13.8,
+      "temp_mean": 20.5,
+      "wind_max": 26.2,
+      "wind_mean": 12.1,
+      "grid_points_used": 10,
+      "quality_flag": "good"
+    },
+    {
+      "ward_id": "3205",
+      "ward_name": "Molo",
+      "rainfall_total": 61.5,
+      "temp_max": 22.8,
+      "temp_min": 11.5,
+      "temp_mean": 18.2,
+      "wind_max": 22.9,
+      "wind_mean": 10.5,
+      "grid_points_used": 12,
+      "quality_flag": "good"
+    }
+  ],
+  "extremes": {
+    "highest_rainfall": {
+      "ward_id": "3205",
+      "ward_name": "Molo",
+      "value": 61.5,
+      "days": [2, 3]
+    },
+    "lowest_rainfall": {
+      "ward_id": "3201",
+      "ward_name": "Nakuru East",
+      "value": 48.5
+    },
+    "hottest_ward": {
+      "ward_id": "3204",
+      "ward_name": "Naivasha",
+      "value": 25.1,
+      "day": 2
+    },
+    "coolest_ward": {
+      "ward_id": "3205",
+      "ward_name": "Molo",
+      "value": 11.5,
+      "day": 0
+    },
+    "windiest_ward": {
+      "ward_id": "3204",
+      "ward_name": "Naivasha",
+      "value": 26.2
+    },
+    "flood_risk_wards": [
+      {
+        "ward_id": "3205",
+        "ward_name": "Molo",
+        "risk_level": "moderate",
+        "total_rainfall": 61.5
+      },
+      {
+        "ward_id": "3203",
+        "ward_name": "Gilgil",
+        "risk_level": "low",
+        "total_rainfall": 58.2
+      }
+    ]
+  },
+  "metadata": {
+    "data_source": "GFS",
+    "model_run": "2026-01-27T00:00:00Z",
+    "generated": "2026-01-27T03:30:00Z",
+    "aggregation_method": "point-in-polygon",
+    "grid_resolution": "0.25°",
+    "grid_points_used": 50,
+    "warnings": ["Higher than normal rainfall expected - monitor flood-prone areas"],
+    "system_version": "1.0.0",
+    "processing_duration_seconds": 14.7
+  },
+  "disclaimer": "This forecast is generated from GFS model data and is for planning purposes only. Contact Kenya Meteorological Department for official forecasts and warnings.",
+  "quality_flags": {
+    "overall_quality": "good",
+    "missing_data_percent": 0.0,
+    "spatial_coverage_percent": 100.0,
+    "warnings": ["Above-normal rainfall predicted"]
+  }
+}

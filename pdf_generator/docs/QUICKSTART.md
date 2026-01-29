@@ -58,7 +58,7 @@ Your PDF will be generated in the `output/` directory.
 
 - Read [INSTALLATION.md](INSTALLATION.md) for detailed setup
 - See [API_KEY_SETUP.md](API_KEY_SETUP.md) for API key troubleshooting
-- Check [README.md](README.md) for usage examples
+- Check [README.md](../README.md) for usage examples
 - Review [AI_INTEGRATION_SUMMARY.md](AI_INTEGRATION_SUMMARY.md) for architecture details
 
 ## Common Commands

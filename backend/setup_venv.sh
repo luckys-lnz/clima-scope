@@ -71,16 +71,50 @@ echo "Installing pdf_generator package..."
 PDF_GEN_PATH="../pdf_generator"
 if [ -d "$PDF_GEN_PATH" ] && [ -f "$PDF_GEN_PATH/setup.py" ]; then
     echo "  Found pdf_generator at: $PDF_GEN_PATH"
-    cd "$PDF_GEN_PATH"
-    pip install -e . 2>/dev/null || {
-        echo -e "${YELLOW}⚠ Could not install pdf_generator as package${NC}"
-        echo "  Will use path-based import instead"
-    }
-    cd - > /dev/null
-    echo -e "${GREEN}✓ pdf_generator package installed${NC}"
+    ORIGINAL_DIR="$(pwd)"
+    
+    # Change to pdf_generator directory
+    if ! cd "$PDF_GEN_PATH"; then
+        echo -e "${RED}✗ Failed to change directory to $PDF_GEN_PATH${NC}"
+        echo "  Skipping pdf_generator installation"
+    else
+        # Try to install the package
+        if pip install -e .; then
+            # Return to original directory
+            if ! cd "$ORIGINAL_DIR"; then
+                echo -e "${RED}✗ CRITICAL: Failed to return to backend directory${NC}"
+                echo "  Current directory: $(pwd)"
+                echo "  Expected directory: $ORIGINAL_DIR"
+                echo "  Cannot continue safely. Exiting."
+                exit 1
+            fi
+            echo -e "${GREEN}✓ pdf_generator package installed${NC}"
+        else
+            # Return to original directory even if install failed
+            if ! cd "$ORIGINAL_DIR"; then
+                echo -e "${RED}✗ CRITICAL: Failed to return to backend directory${NC}"
+                echo "  Current directory: $(pwd)"
+                echo "  Expected directory: $ORIGINAL_DIR"
+                echo "  Cannot continue safely. Exiting."
+                exit 1
+            fi
+            echo -e "${YELLOW}⚠ Could not install pdf_generator as package${NC}"
+            echo "  Will use path-based import instead"
+        fi
+    fi
 else
     echo -e "${YELLOW}⚠ pdf_generator not found at $PDF_GEN_PATH${NC}"
     echo "  Make sure pdf_generator directory exists at project root"
+fi
+
+# Verify we're in the backend directory before continuing
+CURRENT_DIR="$(pwd)"
+if [ "$(basename "$CURRENT_DIR")" != "backend" ]; then
+    echo -e "${RED}✗ CRITICAL: Not in backend directory${NC}"
+    echo "  Current directory: $CURRENT_DIR"
+    echo "  Expected to be in a directory named 'backend'"
+    echo "  Cannot continue safely. Exiting."
+    exit 1
 fi
 
 # Setup .env file

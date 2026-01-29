@@ -470,6 +470,7 @@
         "lowest_rainfall": {
           "type": "object",
           "description": "Ward with lowest rainfall",
+          "required": ["ward_id", "ward_name", "value"],
           "properties": {
             "ward_id": {
               "type": "string"
@@ -481,11 +482,13 @@
               "type": "number",
               "minimum": 0
             }
-          }
+          },
+          "additionalProperties": false
         },
         "hottest_ward": {
           "type": "object",
           "description": "Ward with highest temperature",
+          "required": ["ward_id", "ward_name", "value"],
           "properties": {
             "ward_id": {
               "type": "string"
@@ -501,11 +504,13 @@
               "minimum": 0,
               "maximum": 6
             }
-          }
+          },
+          "additionalProperties": false
         },
         "coolest_ward": {
           "type": "object",
           "description": "Ward with lowest temperature",
+          "required": ["ward_id", "ward_name", "value"],
           "properties": {
             "ward_id": {
               "type": "string"
@@ -521,11 +526,13 @@
               "minimum": 0,
               "maximum": 6
             }
-          }
+          },
+          "additionalProperties": false
         },
         "windiest_ward": {
           "type": "object",
           "description": "Ward with highest wind speed",
+          "required": ["ward_id", "ward_name", "value"],
           "properties": {
             "ward_id": {
               "type": "string"
@@ -536,13 +543,15 @@
             "value": {
               "type": "number"
             }
-          }
+          },
+          "additionalProperties": false
         },
         "flood_risk_wards": {
           "type": "array",
           "description": "Wards with elevated flood risk (based on rainfall thresholds)",
           "items": {
             "type": "object",
+            "required": ["ward_id", "ward_name", "risk_level", "total_rainfall"],
             "properties": {
               "ward_id": {
                 "type": "string"
@@ -557,7 +566,8 @@
               "total_rainfall": {
                 "type": "number"
               }
-            }
+            },
+            "additionalProperties": false
           }
         }
       },
