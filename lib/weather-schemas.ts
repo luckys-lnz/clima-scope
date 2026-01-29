@@ -48,37 +48,37 @@ export interface WardSummary {
 export interface ExtremeValues {
   highest_rainfall?: {
     ward_id: string
-    ward_name?: string
+    ward_name: string
     value: number
     days?: number[]
   }
   lowest_rainfall?: {
     ward_id: string
-    ward_name?: string
+    ward_name: string
     value: number
   }
   hottest_ward?: {
     ward_id: string
-    ward_name?: string
+    ward_name: string
     value: number
     day?: number
   }
   coolest_ward?: {
     ward_id: string
-    ward_name?: string
+    ward_name: string
     value: number
     day?: number
   }
   windiest_ward?: {
     ward_id: string
-    ward_name?: string
+    ward_name: string
     value: number
   }
   flood_risk_wards?: Array<{
     ward_id: string
-    ward_name?: string
-    risk_level?: "low" | "moderate" | "high"
-    total_rainfall?: number
+    ward_name: string
+    risk_level: "low" | "moderate" | "high"
+    total_rainfall: number
   }>
 }
 

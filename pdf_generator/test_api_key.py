@@ -43,6 +43,7 @@ def test_api_key():
         print("2. Check that .env file contains: OPENAI_API_KEY=sk-...")
         print("3. Or set environment variable: export OPENAI_API_KEY='sk-...'")
         print()
+        print("See pdf_generator/docs/API_KEY_SETUP.md for detailed instructions.")
         print("Current .env file location:", Path(__file__).parent / ".env")
         return False
     

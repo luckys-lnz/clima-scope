@@ -273,3 +273,31 @@ class PDFReportBuilder:
             self.config.page_width - self.config.margin_right * cm,
             footer_y + 0.5 * cm
         )
+
+
+if __name__ == "__main__":
+    print("="*70)
+    print("ERROR: This module should not be run directly")
+    print("="*70)
+    print("\nThis is a library module. To generate PDFs, use one of these methods:\n")
+    print("1. Using the sample generation script:")
+    print("   cd pdf_generator")
+    print("   python generate_sample.py")
+    print()
+    print("2. Using the AI-powered generation script:")
+    print("   cd pdf_generator")
+    print("   python generate_ai_sample.py")
+    print()
+    print("3. As a Python module:")
+    print("   python -m pdf_generator.generate_sample")
+    print("   python -m pdf_generator.generate_ai_sample")
+    print()
+    print("4. In your own code:")
+    print("   from pdf_generator import PDFReportBuilder")
+    print("   builder = PDFReportBuilder(report_data)")
+    print("   builder.generate('output.pdf')")
+    print()
+    print("See pdf_generator/README.md for more details.")
+    print("="*70)
+    import sys
+    sys.exit(1)

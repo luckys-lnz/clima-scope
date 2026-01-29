@@ -52,7 +52,7 @@
 ### 5. Migration Setup
 - ✅ Created `alembic/versions/` directory
 - ✅ Created migration helper script: `create_initial_migration.sh`
-- ✅ Created `MIGRATIONS.md` documentation
+- ✅ Created MIGRATIONS.md documentation
 
 ## Files Created
 
@@ -69,9 +69,9 @@
 - ✅ `alembic/versions/.gitkeep` - Versions directory placeholder
 
 ### Documentation & Scripts
-- ✅ `MIGRATIONS.md` - Comprehensive migration guide
+- ✅ `docs/backend/MIGRATIONS.md` - Comprehensive migration guide
 - ✅ `create_initial_migration.sh` - Helper script for creating initial migration
-- ✅ `PHASE_1_3_COMPLETE.md` - This file
+- ✅ `docs/backend/phases/PHASE_1_3_COMPLETE.md` - This file
 
 ## Database Schema Overview
 

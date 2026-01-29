@@ -91,3 +91,14 @@ alembic upgrade head
 Once the server is running, visit:
 - Swagger UI: http://localhost:8000/api/docs
 - ReDoc: http://localhost:8000/api/redoc
+
+## Documentation
+
+Detailed documentation is available in the [docs/backend/](../docs/backend/) directory:
+
+- [STRUCTURE.md](../docs/backend/STRUCTURE.md) - Backend architecture and structure
+- [MIGRATIONS.md](../docs/backend/MIGRATIONS.md) - Database migrations guide
+- [TESTING.md](../docs/backend/TESTING.md) - Testing guide and examples
+- [phases/](../docs/backend/phases/) - Implementation phase completion summaries
+
+See also: [Backend API Implementation Plan](../docs/BACKEND_API_IMPLEMENTATION_PLAN.md)
