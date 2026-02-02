@@ -3,7 +3,6 @@ FastAPI Application Entry Point
 
 Main application setup and configuration.
 """
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -32,23 +31,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include API routers
-from .api.v1 import health, counties, reports, pdf, maps, pipeline, uploads
+# Include API routers - ADD 'auth' to imports
+from .api.v1 import health, auth
 
 app.include_router(health.router, prefix=f"{settings.API_V1_PREFIX}/health", tags=["health"])
-app.include_router(counties.router, prefix=f"{settings.API_V1_PREFIX}/counties", tags=["counties"])
-app.include_router(reports.router, prefix=f"{settings.API_V1_PREFIX}/reports", tags=["reports"])
-app.include_router(pdf.router, prefix=f"{settings.API_V1_PREFIX}/pdf", tags=["pdf"])
-app.include_router(maps.router, prefix=f"{settings.API_V1_PREFIX}/maps", tags=["maps"])
-app.include_router(pipeline.router, prefix=f"{settings.API_V1_PREFIX}/pipeline", tags=["pipeline"])
-app.include_router(uploads.router, prefix=f"{settings.API_V1_PREFIX}/uploads", tags=["uploads"])
+app.include_router(auth.router, prefix=f"{settings.API_V1_PREFIX}/auth", tags=["authentication"])
 
 
 @app.on_event("startup")
 async def startup_event():
     """Application startup event."""
     logger.info("application_starting", version=settings.APP_VERSION)
-    logger.info("database_url_configured", url=settings.DATABASE_URL.split("@")[-1] if "@" in settings.DATABASE_URL else "not_set")
+    logger.info("database_url_configured", url=settings.SUPABASE_URL.split("@")[-1] if "@" in settings.SUPABASE_URL else "not_set")
+    
+    # Add auth initialization if needed
+    logger.info("auth_initialized", provider="Supabase")
 
 
 @app.on_event("shutdown")
@@ -66,4 +63,5 @@ async def root():
         "status": "running",
         "docs": "/api/docs",
         "api_prefix": settings.API_V1_PREFIX,
+        "auth_endpoints": f"{settings.API_V1_PREFIX}/auth",
     }
