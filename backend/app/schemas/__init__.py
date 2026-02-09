@@ -23,6 +23,8 @@ from .report import (
     CompleteReportDetailResponse,
     GenerateCompleteReportRequest,
     GenerateCompleteReportResponse,
+    GeneratePDFWithOptionsRequest,
+    GeneratePDFWithOptionsResponse,
 )
 from .pdf import (
     PDFReportResponse,
@@ -55,6 +57,8 @@ __all__ = [
     "CompleteReportDetailResponse",
     "GenerateCompleteReportRequest",
     "GenerateCompleteReportResponse",
+    "GeneratePDFWithOptionsRequest",
+    "GeneratePDFWithOptionsResponse",
     # PDF
     "PDFReportResponse",
     "PDFReportListResponse",

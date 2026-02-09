@@ -94,3 +94,24 @@ class GenerateCompleteReportResponse(BaseModel):
     """Schema for generate complete report response."""
     complete_report: CompleteReportDetailResponse
     message: str = "Complete report generated successfully"
+
+
+class GeneratePDFWithOptionsRequest(BaseModel):
+    """Schema for generating a PDF from UI selection options."""
+    county_id: Optional[str] = Field(None, description="KNBS county code (2-digit)")
+    county_name: Optional[str] = Field(None, description="Official county name")
+    week_number: int = Field(..., ge=1, le=53, description="ISO week number")
+    year: int = Field(..., ge=2000, le=2100, description="ISO week year")
+    include_observations: bool = Field(default=False, description="Include station observations")
+
+
+class GeneratePDFWithOptionsResponse(BaseModel):
+    """Schema for PDF generation result from UI options."""
+    pdf_url: str
+    filename: str
+    county_id: str
+    county_name: str
+    week_number: int
+    year: int
+    include_observations: bool
+    generated_at: datetime

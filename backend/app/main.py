@@ -5,6 +5,7 @@ Main application setup and configuration.
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from .config import settings
 from .utils.logging import get_logger
@@ -32,10 +33,14 @@ app.add_middleware(
 )
 
 # Include API routers - ADD 'auth' to imports
-from .api.v1 import health, auth
+from .api.v1 import health, auth, reports
 
 app.include_router(health.router, prefix=f"{settings.API_V1_PREFIX}/health", tags=["health"])
 app.include_router(auth.router, prefix=f"{settings.API_V1_PREFIX}/auth", tags=["authentication"])
+app.include_router(reports.router, prefix=f"{settings.API_V1_PREFIX}/reports", tags=["reports"])
+
+# Serve generated PDFs and other stored files
+app.mount("/storage", StaticFiles(directory=settings.STORAGE_PATH), name="storage")
 
 
 @app.on_event("startup")
