@@ -14,8 +14,7 @@ export function DataUpload({ onBack }: DataUploadProps) {
   const uploadRef = useRef<HTMLInputElement>(null)
 
   const [files, setFiles] = useState<File[]>([])
-  const [uploaded, setUploaded] = useState<Upload[]>([])
-  const [step, setStep] = useState<"idle" | "uploading" | "saving" | "done" | "error">("idle")
+  const [step, setStep] = useState<"idle" | "uploading" | "done" | "error">("idle")
   const [error, setError] = useState<string | null>(null)
 
   // ---------------------------
@@ -41,7 +40,7 @@ export function DataUpload({ onBack }: DataUploadProps) {
   const handleDragOver = (e: React.DragEvent) => e.preventDefault()
 
   // ---------------------------
-  // Save / Upload
+  // Upload handler
   // ---------------------------
   const handleSave = async () => {
     if (!files.length) return
@@ -50,14 +49,10 @@ export function DataUpload({ onBack }: DataUploadProps) {
       setStep("uploading")
       setError(null)
 
-      const results: Upload[] = []
-
       for (const file of files) {
-        const upload = await uploadService.uploadFile(file)
-        results.push(upload)
+        await uploadService.uploadFile(file)
       }
 
-      setUploaded(results)
       setStep("done")
       setTimeout(onBack, 2000)
     } catch (err: any) {
@@ -66,8 +61,7 @@ export function DataUpload({ onBack }: DataUploadProps) {
     }
   }
 
-  const isSaveDisabled =
-    step === "uploading" || step === "saving" || files.length === 0
+  const isUploading = step === "uploading"
 
   // ---------------------------
   // UI
@@ -82,6 +76,7 @@ export function DataUpload({ onBack }: DataUploadProps) {
       </button>
 
       <div className="max-w-3xl space-y-6">
+        {/* HEADER */}
         <div className="bg-black rounded-lg border border-gray-700 p-6 text-white">
           <h1 className="font-bold text-xl">Upload Data</h1>
           <p className="text-sm text-gray-300">
@@ -89,35 +84,42 @@ export function DataUpload({ onBack }: DataUploadProps) {
           </p>
         </div>
 
-        {/* STATUS */}
-        {step !== "idle" && step !== "done" && (
+        {/* FEEDBACK (shared success / error section) */}
+        {(step === "done" || step === "error") && (
           <div
             className={`rounded-lg border p-4 ${
-              step === "error"
-                ? "bg-red-500/10 border-red-500/30 text-red-700"
-                : "bg-blue-500/10 border-blue-500/30 text-blue-700"
+              step === "done"
+                ? "border-green-300 bg-green-50"
+                : "border-red-300 bg-red-50"
             }`}
           >
             <div className="flex items-center gap-3">
-              {step === "error"
-                ? <AlertTriangle className="w-5 h-5" />
-                : <Loader2 className="w-5 h-5 animate-spin" />}
-              <p className="font-medium">
-                {step === "uploading" ? "Uploading..." : "Saving..."}
-              </p>
-            </div>
-            {error && <p className="text-sm mt-1">{error}</p>}
-          </div>
-        )}
+              {step === "done" ? (
+                <Check className="w-5 h-5 text-green-600" />
+              ) : (
+                <AlertTriangle className="w-5 h-5 text-red-600" />
+              )}
 
-        {/* SUCCESS */}
-        {step === "done" && (
-          <div className="rounded-lg border border-green-300 bg-green-50 p-4">
-            <div className="flex items-center gap-3">
-              <Check className="w-5 h-5 text-green-600" />
               <div>
-                <p className="font-medium text-green-800">Data saved successfully!</p>
-                <p className="text-sm text-green-700">Redirecting to dashboard…</p>
+                <p
+                  className={`font-medium ${
+                    step === "done" ? "text-green-800" : "text-red-800"
+                  }`}
+                >
+                  {step === "done"
+                    ? "Data saved successfully!"
+                    : "Upload failed"}
+                </p>
+
+                <p
+                  className={`text-sm ${
+                    step === "done" ? "text-green-700" : "text-red-700"
+                  }`}
+                >
+                  {step === "done"
+                    ? "Redirecting to dashboard…"
+                    : error}
+                </p>
               </div>
             </div>
           </div>
@@ -139,10 +141,11 @@ export function DataUpload({ onBack }: DataUploadProps) {
         {/* SAVE BUTTON */}
         <button
           onClick={handleSave}
-          disabled={isSaveDisabled}
-          className="w-full bg-primary hover:bg-primary/90 disabled:opacity-50 text-white py-3 rounded-lg font-medium flex justify-center gap-2"
+          disabled={isUploading || files.length === 0}
+          className="w-full bg-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed text-white py-3 rounded-lg font-medium flex justify-center items-center gap-2"
         >
-          {step === "uploading" ? "Uploading…" : "Save"}
+          {isUploading && <Loader2 className="w-4 h-4 animate-spin" />}
+          {isUploading ? "Saving…" : "Save"}
         </button>
       </div>
     </div>
