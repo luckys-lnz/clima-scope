@@ -32,10 +32,11 @@ app.add_middleware(
 )
 
 # Include API routers - ADD 'auth' to imports
-from .api.v1 import health, auth
+from .api.v1 import health, auth, upload
 
 app.include_router(health.router, prefix=f"{settings.API_V1_PREFIX}/health", tags=["health"])
 app.include_router(auth.router, prefix=f"{settings.API_V1_PREFIX}/auth", tags=["authentication"])
+app.include_router(upload.router, prefix=f"{settings.API_V1_PREFIX}/upload", tags=["upload"])
 
 
 @app.on_event("startup")
