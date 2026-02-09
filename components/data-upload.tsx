@@ -54,7 +54,6 @@ export function DataUpload({ onBack }: DataUploadProps) {
       }
 
       setStep("done")
-      setTimeout(onBack, 2000)
     } catch (err: any) {
       setError(err.message || "Upload failed")
       setStep("error")
@@ -87,23 +86,23 @@ export function DataUpload({ onBack }: DataUploadProps) {
         {/* FEEDBACK (shared success / error section) */}
         {(step === "done" || step === "error") && (
           <div
-            className={`rounded-lg border p-4 ${
+            className={`rounded-lg border p-4 bg-black ${
               step === "done"
-                ? "border-green-300 bg-green-50"
-                : "border-red-300 bg-red-50"
+                ? "border-green-500"
+                : "border-red-500"
             }`}
           >
             <div className="flex items-center gap-3">
               {step === "done" ? (
-                <Check className="w-5 h-5 text-green-600" />
+                <Check className="w-5 h-5 text-green-500" />
               ) : (
-                <AlertTriangle className="w-5 h-5 text-red-600" />
+                <AlertTriangle className="w-5 h-5 text-red-500" />
               )}
 
               <div>
                 <p
                   className={`font-medium ${
-                    step === "done" ? "text-green-800" : "text-red-800"
+                    step === "done" ? "text-green-400" : "text-red-400"
                   }`}
                 >
                   {step === "done"
@@ -113,12 +112,9 @@ export function DataUpload({ onBack }: DataUploadProps) {
 
                 <p
                   className={`text-sm ${
-                    step === "done" ? "text-green-700" : "text-red-700"
+                    step === "done" ? "text-green-300" : "text-red-300"
                   }`}
                 >
-                  {step === "done"
-                    ? "Redirecting to dashboard…"
-                    : error}
                 </p>
               </div>
             </div>
