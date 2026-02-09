@@ -5,8 +5,9 @@ Application settings and environment variables.
 """
 
 import os
+import json
 from pathlib import Path
-from typing import List
+from typing import List, ClassVar
 from pydantic_settings import BaseSettings
 from pydantic import Field
 
@@ -58,6 +59,14 @@ class Settings(BaseSettings):
         env="SUPABASE_STORAGE_BUCKET",
         description="Supabase Storage bucket for weather reports"
     )
+
+    # County Data
+    COUNTY_DATA_PATH: ClassVar[Path] = Path(__file__).parent / "data" / "counties.json"
+    
+    @classmethod
+    def load_county_data(cls):
+        with open(cls.COUNTY_DATA_PATH, "r") as f:
+            return json.load(f)
     
     # PDF Generator
     PDF_GENERATOR_PATH: str = Field(
@@ -80,11 +89,6 @@ class Settings(BaseSettings):
         env="PDF_STORAGE_PATH"
     )
     
-    # Security
-    SECRET_KEY: str = Field(
-        default="change-me-in-production",
-        env="SECRET_KEY"
-    )
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     
