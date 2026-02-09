@@ -1,165 +1,162 @@
-# backend/app/api/v1/auth.py
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from typing import Optional
 
 from app.schemas.auth import (
-    SignupRequest, 
-    LoginRequest, 
+    SignupRequest,
+    LoginRequest,
     AuthResponse,
     UserResponse,
-    ProfileUpdateRequest
+    ProfileUpdateRequest,
 )
-from app.services.auth import auth_service
+from app.config import settings
+from supabase import create_client, Client
 
 router = APIRouter(tags=["authentication"])
 security = HTTPBearer()
 
-# Dependency to get current user
+# -------------------------------------------------
+# Supabase client (INLINE)
+# -------------------------------------------------
+supabase: Client = create_client(
+    settings.SUPABASE_URL,
+    settings.SUPABASE_SERVICE_KEY,
+)
+
+# -------------------------------------------------
+# Dependency: get current user
+# -------------------------------------------------
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security)
+    credentials: HTTPAuthorizationCredentials = Depends(security),
 ):
-    user = await auth_service.get_current_user(credentials.credentials)
-    if not user:
+    token = credentials.credentials
+    resp = supabase.auth.get_user(token)
+
+    if not resp.user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication credentials",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    return user
 
+    return resp.user
+
+# -------------------------------------------------
+# Signup
+# -------------------------------------------------
 @router.post("/signup", response_model=AuthResponse)
 async def signup(user_data: SignupRequest):
-    """Register new user"""
-    result = await auth_service.signup(
-        email=user_data.email,
-        password=user_data.password,
-        user_data=user_data.dict()
-    )
-    
-    # Extract tokens safely
-    session = result.get("session")
-    access_token = ""
-    refresh_token = ""
-    
-    if session and hasattr(session, 'access_token'):
-        access_token = session.access_token
-    if session and hasattr(session, 'refresh_token'):
-        refresh_token = session.refresh_token
-    
+    auth_resp = supabase.auth.sign_up({
+        "email": user_data.email,
+        "password": user_data.password,
+    })
+
+    if not auth_resp.user:
+        raise HTTPException(status_code=400, detail="Signup failed")
+
+    user_id = auth_resp.user.id
+    session = auth_resp.session
+
+    # Create profile
+    supabase.table("profiles").insert({
+        "id": user_id,
+        "full_name": user_data.full_name,
+        "organization": user_data.organization,
+        "county": user_data.county,
+        "phone": user_data.phone,
+    }).execute()
+
     return AuthResponse(
         success=True,
-        access_token=access_token,
-        refresh_token=refresh_token,
+        access_token=session.access_token if session else "",
+        refresh_token=session.refresh_token if session else "",
+        expires_in=3600,
         user=UserResponse(
-            id=result["user_id"],
+            id=user_id,
             email=user_data.email,
             full_name=user_data.full_name,
             organization=user_data.organization,
             county=user_data.county,
-            phone=user_data.phone
-        )
+            phone=user_data.phone,
+        ),
     )
 
-@router.post("/login", response_model=AuthResponse)
-async def login(credentials: LoginRequest):
-    """Login existing user"""
-    result = await auth_service.login(
-        email=credentials.email,
-        password=credentials.password
-    )
-    
-    # Get user profile
-    profile_response = auth_service.client.table("profiles")\
-        .select("*")\
-        .eq("id", result["user"].id)\
-        .single()\
-        .execute()
-    
-    profile = profile_response.data
-    
-    return AuthResponse(
-        success=True,
-        access_token=result["session"].access_token,
-        refresh_token=result["session"].refresh_token,
-        user=UserResponse(
-            id=result["user"].id,
-            email=result["user"].email,
-            full_name=profile["full_name"],
-            organization=profile["organization"],
-            county=profile.get("county"),
-            phone=profile.get("phone")
-        )
-    )
-
+# -------------------------------------------------
+# Logout
+# -------------------------------------------------
 @router.post("/logout")
-async def logout(user = Depends(get_current_user)):
-    """Logout user"""
-    # Note: Supabase handles session invalidation
+async def logout(user=Depends(get_current_user)):
     return {"success": True, "message": "Logged out successfully"}
 
+# -------------------------------------------------
+# Get current user profile
+# -------------------------------------------------
 @router.get("/me", response_model=UserResponse)
-async def get_current_user_profile(user = Depends(get_current_user)):
-    """Get current user's profile"""
-    profile_response = auth_service.client.table("profiles")\
-        .select("*")\
-        .eq("id", user.id)\
-        .single()\
+async def get_current_user_profile(user=Depends(get_current_user)):
+    profile_resp = (
+        supabase.table("profiles")
+        .select("*")
+        .eq("id", user.id)
+        .single()
         .execute()
-    
-    profile = profile_response.data
-    
+    )
+
+    profile = profile_resp.data
+
     return UserResponse(
         id=user.id,
         email=user.email,
         full_name=profile["full_name"],
         organization=profile["organization"],
         county=profile.get("county"),
-        phone=profile.get("phone")
+        phone=profile.get("phone"),
     )
 
+# -------------------------------------------------
+# Update profile
+# -------------------------------------------------
 @router.put("/profile", response_model=UserResponse)
 async def update_profile(
     updates: ProfileUpdateRequest,
-    user = Depends(get_current_user)
+    user=Depends(get_current_user),
 ):
-    """Update user profile"""
-    # Filter out None values
     update_data = {k: v for k, v in updates.dict().items() if v is not None}
-    
+
     if update_data:
-        auth_service.client.table("profiles")\
-            .update(update_data)\
-            .eq("id", user.id)\
+        supabase.table("profiles") \
+            .update(update_data) \
+            .eq("id", user.id) \
             .execute()
-    
-    # Get updated profile
-    profile_response = auth_service.client.table("profiles")\
-        .select("*")\
-        .eq("id", user.id)\
-        .single()\
+
+    profile_resp = (
+        supabase.table("profiles")
+        .select("*")
+        .eq("id", user.id)
+        .single()
         .execute()
-    
-    profile = profile_response.data
-    
+    )
+
+    profile = profile_resp.data
+
     return UserResponse(
         id=user.id,
         email=user.email,
         full_name=profile["full_name"],
         organization=profile["organization"],
         county=profile.get("county"),
-        phone=profile.get("phone")
+        phone=profile.get("phone"),
     )
 
+# -------------------------------------------------
+# Refresh token
+# -------------------------------------------------
 @router.post("/refresh")
 async def refresh_token(refresh_token: str):
-    """Refresh access token"""
     try:
-        result = auth_service.client.auth.refresh_session(refresh_token)
+        result = supabase.auth.refresh_session(refresh_token)
         return {
             "access_token": result.session.access_token,
             "refresh_token": result.session.refresh_token,
-            "expires_in": 3600
+            "expires_in": 3600,
         }
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
