@@ -1,18 +1,23 @@
 "use client"
 
-import type React from "react"
-import Link from "next/link"
-import { Cloud, AlertCircle, CheckCircle } from "lucide-react"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
+import Link from "next/link"
+import { Cloud, AlertCircle, CheckCircle } from "lucide-react"
+import { authService } from "../services/authService"
+import type { LoginData } from "../models/auth"
 
 export default function SignIn() {
   const router = useRouter()
-  const [email, setEmail] = useState("")
-  const [password, setPassword] = useState("")
+  const [formData, setFormData] = useState<LoginData>({ email: "", password: "" })
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
   const [isLoading, setIsLoading] = useState(false)
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target
+    setFormData(prev => ({ ...prev, [name]: value }))
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -21,65 +26,23 @@ export default function SignIn() {
     setSuccess("")
 
     try {
-      // Validation
-      if (!email || !password) {
-        setError("Please fill in all fields")
-        setIsLoading(false)
-        return
-      }
-
-      // Email validation
+      // Validate form
+      if (!formData.email || !formData.password) throw new Error("Please fill in all fields")
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-      if (!emailRegex.test(email)) {
-        setError("Please enter a valid email address")
-        setIsLoading(false)
-        return
-      }
+      if (!emailRegex.test(formData.email)) throw new Error("Please enter a valid email address")
 
-      // Call your FastAPI login endpoint
-      const response = await fetch("http://localhost:8000/api/v1/auth/login", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          email: email,
-          password: password,
-        }),
-      })
+      // Call login via AuthService
+      await authService.login(formData)
 
-      const data = await response.json()
+      setSuccess("Login successful! Redirecting...")
+      setFormData({ email: "", password: "" })
 
-      if (!response.ok) {
-        throw new Error(data.detail || "Login failed")
-      }
-
-      // Success - store tokens and user data
-      if (data.access_token) {
-        // Store tokens in localStorage or secure cookie
-        localStorage.setItem("access_token", data.access_token)
-        localStorage.setItem("refresh_token", data.refresh_token)
-        localStorage.setItem("user", JSON.stringify(data.user))
-        
-        setSuccess("Login successful! Redirecting...")
-        // Reset form
-        setEmail('')
-        setPassword('')
-        
-        // Redirect to dashboard after 1 second
-        setTimeout(() => {
-          router.push("/dashboard")
-        }, 1000)
-      }
-      
+      setTimeout(() => router.push("/dashboard"), 1000)
     } catch (err: any) {
       console.error("Login error:", err)
+      setFormData(prev => ({ ...prev, password: "" }))
 
-      // Clear password field
-      setPassword("")
-
-      // Handle specific error messages
-      if (err.message.includes("Invalid credentials") || err.message.includes("Invalid login")) {
+      if (err.message.includes("Invalid login")) {
         setError("Invalid email or password")
       } else if (err.message.includes("Email not confirmed")) {
         setError("Please confirm your email before logging in")
@@ -120,12 +83,14 @@ export default function SignIn() {
             </div>
           )}
 
+          {/* Email */}
           <div className="space-y-2">
             <label className="block text-sm font-medium">Email</label>
             <input
               type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              name="email"
+              value={formData.email}
+              onChange={handleChange}
               placeholder="you@example.com"
               className="w-full px-3 py-2 border border-border/40 rounded-lg bg-background focus:outline-none focus:border-accent-blue focus:ring-1 focus:ring-accent-blue/50"
               required
@@ -133,12 +98,14 @@ export default function SignIn() {
             />
           </div>
 
+          {/* Password */}
           <div className="space-y-2">
             <label className="block text-sm font-medium">Password</label>
             <input
               type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              name="password"
+              value={formData.password}
+              onChange={handleChange}
               placeholder="••••••••"
               className="w-full px-3 py-2 border border-border/40 rounded-lg bg-background focus:outline-none focus:border-accent-blue focus:ring-1 focus:ring-accent-blue/50"
               required
@@ -163,22 +130,16 @@ export default function SignIn() {
         </form>
 
         {/* Footer */}
-        <div className="space-y-4 mt-6">
-          <p className="text-center text-sm text-muted-foreground">
+        <div className="space-y-4 mt-6 text-center">
+          <p className="text-sm text-muted-foreground">
             Don't have an account?{" "}
             <Link href="/sign-up" className="text-accent-blue hover:underline font-medium">
               Sign up
             </Link>
           </p>
-          
-          <div className="text-center">
-            <Link 
-              href="/forgot-password" 
-              className="text-sm text-muted-foreground hover:text-accent-blue transition-colors"
-            >
-              Forgot your password?
-            </Link>
-          </div>
+          <Link href="/forgot-password" className="text-sm text-muted-foreground hover:text-accent-blue transition-colors">
+            Forgot your password?
+          </Link>
         </div>
       </div>
     </div>
