@@ -9,7 +9,7 @@ import { ReportArchive } from "@/components/screens/report-archive"
 import { CountyDetail } from "@/components/screens/county-detail"
 import { LogsDiagnostics } from "@/components/screens/logs-diagnostics"
 import { SystemConfiguration } from "@/components/screens/system-configuration"
-import { DataUpload } from "@/components/screens/data-upload"
+import { DataUpload } from "@/components/data-upload"
 
 type Screen = "dashboard" | "generate" | "archive" | "county" | "logs" | "config" | "upload"
 
