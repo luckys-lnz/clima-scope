@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { Cloud, TrendingUp, BarChart3, MapPin, Lock, Zap } from "lucide-react"
 
+
 export default function Home() {
   return (
     <div className="min-h-screen bg-background text-foreground">

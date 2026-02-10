@@ -32,12 +32,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include API routers - ADD 'auth' to imports
-from .api.v1 import health, auth, reports
+# Include API routers
+from .api.v1 import health, auth, reports, upload
 
 app.include_router(health.router, prefix=f"{settings.API_V1_PREFIX}/health", tags=["health"])
 app.include_router(auth.router, prefix=f"{settings.API_V1_PREFIX}/auth", tags=["authentication"])
 app.include_router(reports.router, prefix=f"{settings.API_V1_PREFIX}/reports", tags=["reports"])
+app.include_router(upload.router, prefix=f"{settings.API_V1_PREFIX}/uploads", tags=["upload"])
 
 # Serve generated PDFs and other stored files
 app.mount("/storage", StaticFiles(directory=settings.STORAGE_PATH), name="storage")

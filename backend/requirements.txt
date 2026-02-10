@@ -1,42 +1,56 @@
 # FastAPI Backend Dependencies
 
 # Web Framework
-fastapi>=0.104.0
-uvicorn[standard]>=0.24.0
+fastapi==0.104.1
+uvicorn==0.24.0
 
 # Database
-sqlalchemy>=2.0.0
-alembic>=1.12.0
-psycopg2-binary>=2.9.9  # PostgreSQL driver
+sqlalchemy==2.0.46
+alembic==1.16.5
+psycopg2-binary==2.9.11
 
 # Data Validation
-pydantic>=2.9.0
-pydantic-settings>=2.0.0
+pydantic==2.12.5
+pydantic-settings==2.11.0
 
 # Environment Variables
-python-dotenv>=1.0.0
+python-dotenv==1.2.1
 
 # Authentication
-python-jose[cryptography]>=3.3.0
-passlib[bcrypt]>=1.7.4
+python-jose[cryptography]==3.5.0
+passlib[bcrypt]==1.7.4
 
-# HTTP Client (for external APIs)
-httpx>=0.25.0
+# HTTP Client
+httpx==0.24.1
 
 # File Upload Support
-python-multipart>=0.0.6
+python-multipart==0.0.6
 
 # Caching (optional)
-redis>=5.0.0
-hiredis>=2.2.0
+redis==7.0.1
+hiredis==3.3.0
 
-# Background Tasks (optional)
-celery>=5.3.0
+# Background Tasks
+celery==5.6.2
 
 # Utilities
-python-dateutil>=2.9.0
+python-dateutil==2.9.0.post0
 
 # Logging
-structlog>=23.2.0
+structlog==25.5.0
 
-# Note: Testing dependencies moved to requirements-dev.txt
+# Supabase
+supabase==1.1.1
+websockets==12.0
+
+# Geopandas      
+geopandas==0.14.0
+
+# Pandas
+pandas==2.1.3
+numpy==1.26.4
+
+# Geopandas dependencies
+shapely==2.0.7
+fiona==1.10.1
+pyproj==3.6.1
