@@ -1,8 +1,8 @@
 "use client"
 
 import { useState } from "react"
-import Link from "next/link"
-import { BarChart3, FileText, Archive, Activity, Upload, Settings, MapPin, Menu, X } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { BarChart3, FileText, Archive, Activity, Upload, Settings, MapPin, Menu, X, LogOut } from "lucide-react"
 import { DashboardOverview } from "@/components/screens/dashboard-overview"
 import { ManualGeneration } from "@/components/screens/manual-generation"
 import { ReportArchive } from "@/components/screens/report-archive"
@@ -14,9 +14,38 @@ import { DataUpload } from "@/components/screens/data-upload"
 type Screen = "dashboard" | "generate" | "archive" | "county" | "logs" | "config" | "upload"
 
 export default function Dashboard() {
+  const router = useRouter()
   const [currentScreen, setCurrentScreen] = useState<Screen>("dashboard")
   const [selectedCounty, setSelectedCounty] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [isLoggingOut, setIsLoggingOut] = useState(false)
+
+  const handleLogout = async () => {
+    setIsLoggingOut(true)
+    try {
+      // Clear local storage
+      localStorage.removeItem("access_token")
+      localStorage.removeItem("refresh_token")
+      localStorage.removeItem("user")
+      
+      // Optional: Call backend logout
+      const token = localStorage.getItem("access_token") // Get before clearing
+      if (token) {
+        await fetch("http://localhost:8000/api/v1/auth/logout", {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${token}` }
+        })
+      }
+      
+      // Use replace, not push
+      window.location.replace("/sign-in")
+      
+    } catch (error) {
+      console.error("Logout error:", error)
+      // Still replace on error
+      window.location.replace("/sign-in")
+    }
+  }
 
   const navItems = [
     { id: "dashboard", label: "Dashboard", icon: BarChart3 },
@@ -30,7 +59,7 @@ export default function Dashboard() {
   const renderScreen = () => {
     switch (currentScreen) {
       case "dashboard":
-        return <DashboardOverview onNavigate={setCurrentScreen} />
+        return <DashboardOverview onNavigate={(screen: string) => setCurrentScreen(screen as Screen)} />
       case "generate":
         return <ManualGeneration onBack={() => setCurrentScreen("dashboard")} />
       case "archive":
@@ -51,7 +80,7 @@ export default function Dashboard() {
       case "upload":
         return <DataUpload onBack={() => setCurrentScreen("dashboard")} />
       default:
-        return <DashboardOverview onNavigate={setCurrentScreen} />
+        return <DashboardOverview onNavigate={(screen: string) => setCurrentScreen(screen as Screen)} />
     }
   }
 
@@ -145,12 +174,18 @@ export default function Dashboard() {
               <h2 className="text-2xl font-bold">{getTitle(currentScreen as string)}</h2>
             </div>
             <div className="flex items-center gap-4">
-              <Link
-                href="/"
-                className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+              <button
+                onClick={handleLogout}
+                disabled={isLoggingOut}
+                className="flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Home
-              </Link>
+                {isLoggingOut ? (
+                  <div className="w-4 h-4 border-2 border-red-600 border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <LogOut className="w-4 h-4" />
+                )}
+                <span>{isLoggingOut ? "Logging out..." : "Logout"}</span>
+              </button>
             </div>
           </div>
         </header>

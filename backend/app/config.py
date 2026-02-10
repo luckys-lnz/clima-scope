@@ -32,17 +32,32 @@ class Settings(BaseSettings):
     def cors_origins_list(self) -> List[str]:
         """Parse CORS origins from comma-separated string."""
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
-    
-    # Database
-    DATABASE_URL: str = Field(
-        default="postgresql://user:password@localhost/climascope",
-        env="DATABASE_URL"
+
+    # SUPABASE SETTINGS
+    SUPABASE_URL: str = Field(
+        default="",  # Will be required from .env
+        env="SUPABASE_URL",
+        description="Supabase project URL"
     )
-    DATABASE_ECHO: bool = Field(default=False, env="DATABASE_ECHO")
     
-    # Redis (optional)
-    REDIS_URL: str = Field(default="redis://localhost:6379/0", env="REDIS_URL")
-    REDIS_ENABLED: bool = Field(default=False, env="REDIS_ENABLED")
+    SUPABASE_SERVICE_KEY: str = Field(
+        default="",  # Will be required from .env
+        env="SUPABASE_SERVICE_KEY",
+        description="Supabase service role key (for backend operations)"
+    )
+    
+    SUPABASE_ANON_KEY: str = Field(
+        default="",  # Will be required from .env
+        env="SUPABASE_ANON_KEY", 
+        description="Supabase anonymous key (for frontend operations)"
+    )
+    
+    # Optional: Supabase Storage bucket name
+    SUPABASE_STORAGE_BUCKET: str = Field(
+        default="weather-reports",
+        env="SUPABASE_STORAGE_BUCKET",
+        description="Supabase Storage bucket for weather reports"
+    )
     
     # PDF Generator
     PDF_GENERATOR_PATH: str = Field(

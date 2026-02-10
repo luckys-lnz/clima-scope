@@ -5,6 +5,7 @@ import { ChevronLeft, Download, RefreshCw } from "lucide-react"
 import { motion } from "framer-motion"
 import { SelectInput } from "@/components/select-input"
 import { LogViewer } from "@/components/log-viewer"
+import { api } from "@/lib/api-client"
 
 interface ManualGenerationProps {
   onBack: () => void
@@ -56,47 +57,58 @@ const COUNTIES = [
 
 export function ManualGeneration({ onBack }: ManualGenerationProps) {
   const [selectedCounty, setSelectedCounty] = useState("")
-  const [selectedWeek, setSelectedWeek] = useState("week-50-2024")
+  const [selectedWeek, setSelectedWeek] = useState("2024-50")
   const [includeObservations, setIncludeObservations] = useState(true)
   const [isGenerating, setIsGenerating] = useState(false)
   const [isComplete, setIsComplete] = useState(false)
   const [logs, setLogs] = useState<string[]>([])
+  const [downloadUrl, setDownloadUrl] = useState("")
+  const [errorMessage, setErrorMessage] = useState("")
 
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
     setIsGenerating(true)
     setLogs([])
     setIsComplete(false)
+    setDownloadUrl("")
+    setErrorMessage("")
 
     const newLogs = [
       `[${new Date().toLocaleTimeString()}] Starting report generation for ${selectedCounty}...`,
-      `[${new Date().toLocaleTimeString()}] Fetching GFS 7-day forecast data...`,
+      `[${new Date().toLocaleTimeString()}] Submitting generation request...`,
     ]
     setLogs(newLogs)
 
-    setTimeout(() => {
-      setLogs((prev) => [...prev, `[${new Date().toLocaleTimeString()}] Parsing GRIB files...`])
-    }, 1000)
+    try {
+      const [yearStr, weekStr] = selectedWeek.split("-")
+      const weekNumber = Number(weekStr)
+      const year = Number(yearStr)
 
-    setTimeout(() => {
-      setLogs((prev) => [...prev, `[${new Date().toLocaleTimeString()}] Performing spatial aggregation...`])
-    }, 2000)
+      setLogs((prev) => [...prev, `[${new Date().toLocaleTimeString()}] Generating PDF on server...`])
 
-    setTimeout(() => {
+      const response = await api.generatePDFWithOptions({
+        county_name: selectedCounty,
+        week_number: weekNumber,
+        year,
+        include_observations: includeObservations,
+      })
+
+      const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      setDownloadUrl(`${baseUrl}${response.pdf_url}`)
       setLogs((prev) => [
         ...prev,
-        `[${new Date().toLocaleTimeString()}] Generating ward-level maps (rainfall, temperature, wind)...`,
+        `[${new Date().toLocaleTimeString()}] ✓ PDF generated: ${response.filename}`,
       ])
-    }, 3000)
-
-    setTimeout(() => {
-      setLogs((prev) => [...prev, `[${new Date().toLocaleTimeString()}] Creating PDF report...`])
-    }, 4000)
-
-    setTimeout(() => {
-      setLogs((prev) => [...prev, `[${new Date().toLocaleTimeString()}] ✓ Report generation completed successfully`])
-      setIsGenerating(false)
       setIsComplete(true)
-    }, 5000)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to generate report"
+      setErrorMessage(message)
+      setLogs((prev) => [
+        ...prev,
+        `[${new Date().toLocaleTimeString()}] ✗ Report generation failed: ${message}`,
+      ])
+    } finally {
+      setIsGenerating(false)
+    }
   }
 
   return (
@@ -142,9 +154,9 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
                 value={selectedWeek}
                 onChange={setSelectedWeek}
                 options={[
-                  { value: "week-50-2024", label: "Week 50, 2024 (Dec 2-8)" },
-                  { value: "week-51-2024", label: "Week 51, 2024 (Dec 9-15)" },
-                  { value: "week-52-2024", label: "Week 52, 2024 (Dec 16-22)" },
+                  { value: "2024-50", label: "Week 50, 2024 (Dec 2-8)" },
+                  { value: "2024-51", label: "Week 51, 2024 (Dec 9-15)" },
+                  { value: "2024-52", label: "Week 52, 2024 (Dec 16-22)" },
                 ]}
               />
             </div>
@@ -185,6 +197,12 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
             <h2 className="font-bold text-base sm:text-lg text-card-foreground mb-4">Processing Logs</h2>
             <LogViewer logs={logs} />
 
+            {errorMessage && (
+              <div className="mt-4 bg-red-500/10 border border-red-500/30 rounded-lg p-4">
+                <p className="text-xs sm:text-sm text-red-600 font-medium">{errorMessage}</p>
+              </div>
+            )}
+
             {isComplete && (
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
@@ -196,18 +214,22 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
                   <p className="text-xs sm:text-sm text-green-600 font-medium">✓ Report generated successfully</p>
                 </div>
                 <div className="flex flex-col sm:flex-row gap-3">
-                  <motion.button
+                  <motion.a
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
+                    href={downloadUrl}
+                    target="_blank"
+                    rel="noreferrer"
                     className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground py-2 px-4 rounded-lg text-xs sm:text-sm font-medium transition-colors flex items-center justify-center gap-2"
                   >
                     <Download className="w-4 h-4" />
                     Download PDF
-                  </motion.button>
+                  </motion.a>
                   <motion.button
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                     className="flex-1 bg-card hover:bg-muted border border-border text-card-foreground py-2 px-4 rounded-lg text-xs sm:text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                    onClick={handleGenerate}
                   >
                     <RefreshCw className="w-4 h-4" />
                     Regenerate

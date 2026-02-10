@@ -67,6 +67,25 @@ export interface MapMetadata {
   generated_at: string;
 }
 
+export interface GeneratePDFWithOptionsRequest {
+  county_id?: string;
+  county_name?: string;
+  week_number: number;
+  year: number;
+  include_observations: boolean;
+}
+
+export interface GeneratePDFWithOptionsResponse {
+  pdf_url: string;
+  filename: string;
+  county_id: string;
+  county_name: string;
+  week_number: number;
+  year: number;
+  include_observations: boolean;
+  generated_at: string;
+}
+
 // Request Types
 export interface CreateReportRequest {
   county_id: string;
@@ -196,6 +215,16 @@ export class ClimascopeAPI {
     }
     
     return await response.blob();
+  }
+
+  // Generate PDF with UI options
+  async generatePDFWithOptions(
+    request: GeneratePDFWithOptionsRequest
+  ): Promise<GeneratePDFWithOptionsResponse> {
+    return this.request('/api/v1/reports/generate-pdf', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
   }
 
   // Pipeline Methods
