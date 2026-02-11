@@ -1,6 +1,0 @@
-# Optional: renderPM support for advanced ReportLab features
-# This may not build on Python 3.14+ due to compatibility issues
-# Install only if you need advanced image rendering features
-# Usage: pip install -r requirements-renderpm.txt
-
-reportlab[renderPM]>=4.0.0
