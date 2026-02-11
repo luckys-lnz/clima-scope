@@ -1,0 +1,21 @@
+# Include package data
+include README.md
+include LICENSE
+include requirements.txt
+include requirements-dev.txt
+include requirements-anthropic.txt
+include .env.example
+include API_KEY_SETUP.md
+include AI_INTEGRATION_SUMMARY.md
+
+# Include sample data
+recursive-include pdf_generator/sample_data *.json
+
+# Exclude development files
+global-exclude __pycache__
+global-exclude *.py[co]
+global-exclude *.so
+global-exclude .DS_Store
+global-exclude .env
+global-exclude venv
+global-exclude *.egg-info
