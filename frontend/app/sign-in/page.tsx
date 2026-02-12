@@ -4,8 +4,8 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Cloud, AlertCircle, CheckCircle } from "lucide-react"
-import { authService } from "../services/authService"
-import type { LoginData } from "../models/auth"
+import { authService } from "@/lib/services/authService"
+import type { LoginData } from "@/lib/models/auth"
 
 export default function SignIn() {
   const router = useRouter()
