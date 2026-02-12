@@ -2,9 +2,8 @@
 
 import { useRef, useState } from "react"
 import { Loader2, Check, AlertTriangle } from "lucide-react"
-import { uploadService } from "../app/services/uploadService"
-import { FileUploadSection } from "./file-upload-section"
-import type { Upload } from "@/app/models/upload"
+import { uploadService } from "@/lib/services/uploadService"
+import { FileUploadSection } from "@/components/file-upload-section"
 
 interface DataUploadProps {
   onBack: () => void
@@ -16,10 +15,9 @@ export function DataUpload({ onBack }: DataUploadProps) {
   const [files, setFiles] = useState<File[]>([])
   const [step, setStep] = useState<"idle" | "uploading" | "done" | "error">("idle")
   const [error, setError] = useState<string | null>(null)
+  const [uploadedFiles, setUploadedFiles] = useState<any[]>([])
 
-  // ---------------------------
   // File selection
-  // ---------------------------
   const handleFileSelect = (fileList: FileList | null) => {
     if (!fileList) return
     setFiles(prev => [...prev, ...Array.from(fileList)])
@@ -29,9 +27,7 @@ export function DataUpload({ onBack }: DataUploadProps) {
     setFiles(prev => prev.filter((_, i) => i !== index))
   }
 
-  // ---------------------------
   // Drag & drop
-  // ---------------------------
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault()
     handleFileSelect(e.dataTransfer.files)
@@ -39,9 +35,7 @@ export function DataUpload({ onBack }: DataUploadProps) {
 
   const handleDragOver = (e: React.DragEvent) => e.preventDefault()
 
-  // ---------------------------
   // Upload handler
-  // ---------------------------
   const handleSave = async () => {
     if (!files.length) return
 
@@ -49,29 +43,33 @@ export function DataUpload({ onBack }: DataUploadProps) {
       setStep("uploading")
       setError(null)
 
-      for (const file of files) {
-        await uploadService.uploadFile(file)
-      }
-
+      // Upload all files at once
+      const response = await uploadService.uploadFiles(files, "observations")
+      
+      setUploadedFiles(response)
       setStep("done")
+      
+      // Clear files after successful upload
+      setTimeout(() => {
+        setFiles([])
+      }, 2000)
+      
     } catch (err: any) {
       setError(err.message || "Upload failed")
       setStep("error")
+      console.error("Upload error:", err)
     }
   }
 
   const isUploading = step === "uploading"
 
-  // ---------------------------
-  // UI
-  // ---------------------------
   return (
     <div className="p-6 space-y-6">
       <button
         onClick={onBack}
         className="flex items-center gap-2 text-primary hover:text-primary/80 mb-4"
       >
-        Back to Dashboard
+        ← Back to Dashboard
       </button>
 
       <div className="max-w-3xl space-y-6">
@@ -83,7 +81,7 @@ export function DataUpload({ onBack }: DataUploadProps) {
           </p>
         </div>
 
-        {/* FEEDBACK (shared success / error section) */}
+        {/* FEEDBACK */}
         {(step === "done" || step === "error") && (
           <div
             className={`rounded-lg border p-4 bg-black ${
@@ -106,7 +104,7 @@ export function DataUpload({ onBack }: DataUploadProps) {
                   }`}
                 >
                   {step === "done"
-                    ? "Data saved successfully!"
+                    ? `Successfully uploaded ${uploadedFiles.length} file${uploadedFiles.length !== 1 ? 's' : ''}!`
                     : "Upload failed"}
                 </p>
 
@@ -115,6 +113,7 @@ export function DataUpload({ onBack }: DataUploadProps) {
                     step === "done" ? "text-green-300" : "text-red-300"
                   }`}
                 >
+                  {step === "error" && error}
                 </p>
               </div>
             </div>
@@ -141,8 +140,17 @@ export function DataUpload({ onBack }: DataUploadProps) {
           className="w-full bg-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed text-white py-3 rounded-lg font-medium flex justify-center items-center gap-2"
         >
           {isUploading && <Loader2 className="w-4 h-4 animate-spin" />}
-          {isUploading ? "Saving…" : "Save"}
+          {isUploading 
+            ? `Uploading ${files.length} file${files.length !== 1 ? 's' : ''}...` 
+            : "Upload Files"}
         </button>
+        
+        {/* File count display */}
+        {files.length > 0 && !isUploading && (
+          <p className="text-sm text-gray-400 text-center">
+            {files.length} file{files.length !== 1 ? 's' : ''} ready to upload
+          </p>
+        )}
       </div>
     </div>
   )
