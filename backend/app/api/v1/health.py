@@ -7,8 +7,8 @@ Provides health status and system information.
 from fastapi import APIRouter
 from datetime import datetime
 
-from ...config import settings
-from ...utils.logging import get_logger
+from app.core.config import settings
+from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
 

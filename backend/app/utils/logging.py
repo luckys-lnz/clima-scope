@@ -11,7 +11,7 @@ from typing import Any
 import structlog
 from structlog.stdlib import LoggerFactory
 
-from ..config import settings
+from app.core.config import settings
 
 
 def setup_logging() -> None:
