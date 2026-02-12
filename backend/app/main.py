@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from .config import settings
+from app.core.config import settings
 from .utils.logging import get_logger
 
 # Get logger
@@ -33,11 +33,11 @@ app.add_middleware(
 )
 
 # Include API routers
-from .api.v1 import health, auth, upload
+from .api.v1 import health, auth, uploads
 
 app.include_router(health.router, prefix=f"{settings.API_V1_PREFIX}/health", tags=["health"])
 app.include_router(auth.router, prefix=f"{settings.API_V1_PREFIX}/auth", tags=["authentication"])
-app.include_router(upload.router, prefix=f"{settings.API_V1_PREFIX}/uploads", tags=["upload"])
+app.include_router(uploads.router, prefix=f"{settings.API_V1_PREFIX}/uploads", tags=["uploads"])
 
 
 @app.on_event("startup")
