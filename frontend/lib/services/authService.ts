@@ -1,34 +1,52 @@
 // app/services/authService.ts
 "use client"
 
-import { supabase } from "../../lib/supabaseClient"
-import type { SignUpData, LoginData, User } from "../models/auth"
+import type { 
+  SignUpData, 
+  LoginData, 
+  User 
+} from "@/lib/models/auth"
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+
+export interface LoginResponse {
+  user: User
+  access_token: string
+}
+
+export interface Session {
+  user: User
+  access_token: string
+}
 
 export const authService = {
   // -----------------------
-  // LOGIN
+  // LOGIN - Calls your backend
   // -----------------------
-  login: async (data: LoginData): Promise<User> => {
-    const { email, password } = data
-
-    const { data: { session }, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
+  login: async (data: LoginData): Promise<LoginResponse> => {
+    const response = await fetch(`${API_BASE}/api/v1/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
     })
 
-    if (error) throw new Error(error.message)
-    if (!session) throw new Error("No session returned")
+    const result = await response.json()
+    if (!response.ok) {
+      throw new Error(result.detail || "Login failed")
+    }
 
-    return session.user as unknown as User
+    // Store in localStorage
+    localStorage.setItem("access_token", result.access_token)
+    localStorage.setItem("user", JSON.stringify(result.user))
+
+    return result
   },
 
   // -----------------------
   // SIGNUP via Backend
   // -----------------------
   signup: async (data: SignUpData): Promise<{ message: string }> => {
-    // Here we call your backend API, which uses service key
-    const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/signup`, {
+    const response = await fetch(`${API_BASE}/api/v1/auth/signup`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
@@ -45,17 +63,60 @@ export const authService = {
   // -----------------------
   // LOGOUT
   // -----------------------
-  logout: async (): Promise<void> => {
-    const { error } = await supabase.auth.signOut()
-    if (error) throw new Error(error.message)
+  logout: async (token: string): Promise<void> => {
+    const response = await fetch(`${API_BASE}/api/v1/auth/logout`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+    })
+
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.detail || "Logout failed")
+    }
+
+    localStorage.removeItem("access_token")
+    localStorage.removeItem("user")
   },
 
   // -----------------------
-  // GET CURRENT SESSION
+  // GET CURRENT USER FROM TOKEN
   // -----------------------
-  getSession: async () => {
-    const { data: { session }, error } = await supabase.auth.getSession()
-    if (error) throw new Error(error.message)
-    return session
+  getCurrentUser: async (token: string): Promise<User> => {
+    const response = await fetch(`${API_BASE}/api/v1/auth/me`, {
+      headers: {
+        "Authorization": `Bearer ${token}`
+      }
+    })
+
+    if (!response.ok) {
+      throw new Error("Failed to get user")
+    }
+
+    return response.json()
+  },
+
+  // -----------------------
+  // GET SESSION FROM LOCALSTORAGE
+  // -----------------------
+  getSession: async (): Promise<Session | null> => {
+    const token = localStorage.getItem("access_token")
+    const userStr = localStorage.getItem("user")
+    
+    if (!token || !userStr) {
+      return null
+    }
+
+    try {
+      const user = JSON.parse(userStr) as User
+      return {
+        user,
+        access_token: token
+      }
+    } catch {
+      return null
+    }
   }
 }
