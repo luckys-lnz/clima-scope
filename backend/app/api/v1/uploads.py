@@ -4,7 +4,7 @@ from datetime import datetime
 import uuid
 
 from app.schemas.upload import UploadResponse
-from app.services.supabase import get_storage_client, get_db_client
+from app.core.supabase import get_storage_client, get_db_client
 from app.api.v1.auth import get_current_user
 from app.core.config import settings
 
