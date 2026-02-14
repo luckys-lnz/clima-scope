@@ -10,7 +10,7 @@ from app.schemas.auth import (
     UserResponse,
     ProfileUpdateRequest,
 )
-from app.services.supabase import get_auth_client, get_db_client
+from app.core.supabase import get_auth_client, get_db_client
 
 router = APIRouter(tags=["authentication"])
 security = HTTPBearer()
