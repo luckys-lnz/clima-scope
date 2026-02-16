@@ -10,6 +10,7 @@ export interface UserSettings {
 }
 
 export interface SettingsResponse {
+    shapefile_path: string
     shapefile_name: string
     templates: SharedFile[]
     user_settings: UserSettings
