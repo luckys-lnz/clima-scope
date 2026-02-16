@@ -10,7 +10,7 @@ import { SystemConfiguration } from "@/components/ui-panels/system-configuration
 import { DataUpload } from "@/components/data-upload"
 
 type Screen = "dashboard" | "generate" | "archive" | "config" | "upload"
-
+ 
 export default function Dashboard() {
   const router = useRouter()
   const [currentScreen, setCurrentScreen] = useState<Screen>("dashboard")
