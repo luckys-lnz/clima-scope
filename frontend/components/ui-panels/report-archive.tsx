@@ -8,6 +8,8 @@ import { ReportService } from "@/lib/services/reportService"
 import { useAuth } from "@/hooks/useAuth"
 import type { ReportArchiveItem } from "@/lib/models/report"
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL
+
 interface ReportArchiveProps {
   onSelectCounty: (county: string) => void
 }
@@ -190,7 +192,11 @@ export function ReportArchive({ onSelectCounty }: ReportArchiveProps) {
                       <motion.button
                         whileHover={{ scale: 1.05 }}
                         whileTap={{ scale: 0.95 }}
-                        onClick={() => report.pdfUrl && window.open(report.pdfUrl, "_blank")}
+                        onClick={() => {
+                          if (!token) return
+                          // prepend API_BASE for download
+                          window.open(`${API_BASE}${report.pdfUrl}`, "_blank")
+                        }}
                         className="text-primary hover:text-primary/80 text-xs font-medium"
                       >
                         PDF
