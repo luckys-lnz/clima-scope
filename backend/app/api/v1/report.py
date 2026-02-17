@@ -8,7 +8,7 @@ from uuid import UUID
 from app.schemas.report import ReportArchiveItem
 from app.api.v1.auth import get_current_user
 from app.core.supabase import get_db_client
-from app.core.config import settings  # Import your Settings instance
+from app.core.config import settings
 
 router = APIRouter(tags=["reports"])
 
@@ -66,41 +66,32 @@ async def get_user_reports(user=Depends(get_current_user)):
 
     return reports
 
-
 @router.get("/download/{report_id}")
 async def download_report(report_id: UUID, user=Depends(get_current_user)):
-    """
-    Securely download a PDF report belonging to the current user
-    """
     db = get_db_client()
+    storage = get_storage_client()
+
     user_id = user.get("id") if isinstance(user, dict) else user.id
 
-    # Ensure report belongs to user
     rows = await db.select(
         table="generated_reports",
-        filters={
-            "id": f"eq.{report_id}",
-            "user_id": f"eq.{user_id}"
-        },
+        filters={"id": f"eq.{report_id}", "user_id": f"eq.{user_id}"},
         columns="file_path"
     ) or []
 
     if not rows:
         raise HTTPException(status_code=404, detail="Report not found")
 
-    file_rel_path = rows[0]["file_path"]
+    file_path = rows[0]["file_path"]
 
-    if not file_rel_path:
+    if not file_path:
         raise HTTPException(status_code=404, detail="File path missing")
 
-    # Combine the configured storage path with the relative file path
-    full_path = Path(settings.STORAGE_PATH) / file_rel_path
+    # fetch file from Supabase Storage using service role key
+    file_data = await storage.download_file(file_path)
+    if not file_data:
+        raise HTTPException(status_code=404, detail="File not found in storage")
 
-    if not full_path.exists() or not full_path.is_file():
-        raise HTTPException(status_code=404, detail="File not found on server")
-
-    return FileResponse(
-        path=str(full_path),
-        filename=full_path.name,
-        media_type="application/pdf"
-    )
+    return StreamingResponse(io.BytesIO(file_data), media_type="application/pdf", headers={
+        "Content-Disposition": f'attachment; filename="{file_path.split("/")[-1]}"'
+    })
