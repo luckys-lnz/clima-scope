@@ -1,34 +1,75 @@
 "use client"
 
-import { BarChart3, AlertTriangle, CheckCircle, Clock, ArrowRight } from "lucide-react"
+import { ArrowRight, CheckCircle, Circle, AlertTriangle, Clock } from "lucide-react"
 
 interface DashboardOverviewProps {
   onNavigate: (screen: string) => void
 }
 
+type WorkflowStep = "uploaded" | "aggregated" | "mapped" | "generated" | "completed" | null
+
+// Dummy backend data
+const dashboardData: {
+  stats: {
+    countiesProcessed: number
+    totalCounties: number
+    allReportsDone: number
+    lastGeneration: string
+    userReportsGenerated: number
+  }
+  workflow_step: WorkflowStep
+} = {
+  stats: {
+    countiesProcessed: 32,
+    totalCounties: 47,
+    allReportsDone: 152,
+    lastGeneration: "Feb 16",
+    userReportsGenerated: 12,
+  },
+  workflow_step: "aggregated", // set current workflow step here
+}
+
 export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
+  const { stats, workflow_step } = dashboardData
+
+  // Steps array in order
+  const steps: { key: WorkflowStep; label: string }[] = [
+    { key: "uploaded", label: "Upload Observation Data" },
+    { key: "aggregated", label: "Spatial Aggregation" },
+    { key: "mapped", label: "Generate Map" },
+    { key: "generated", label: "Generate Report" },
+  ]
+
+  // Determine active index (find by key)
+  const activeIndex = workflow_step
+    ? steps.findIndex(step => step.key === workflow_step)
+    : -1
+
+  const progressPercent = ((activeIndex + 1) / steps.length) * 100
+
   return (
     <div className="p-6 space-y-6">
-      {/* Alert Cards */}
+      {/* Alerts / Reminders */}
       <div className="space-y-3">
         <div className="bg-amber-900/20 border border-amber-700/40 rounded-lg p-4">
           <div className="flex items-start gap-3">
             <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
             <div className="flex-1 min-w-0">
-              <p className="font-semibold text-sm">GRIB Data Mismatch</p>
+              <p className="font-semibold text-sm">Observation Data Reminder</p>
               <p className="text-xs text-muted-foreground mt-1">
-                GFS data from Dec 8 missing 4 wards. Archive data restored.
+                Make sure your observation data for your county is uploaded and complete for this week.
               </p>
             </div>
           </div>
         </div>
+
         <div className="bg-blue-900/20 border border-blue-700/40 rounded-lg p-4">
           <div className="flex items-start gap-3">
-            <Clock className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
+            <CheckCircle className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
             <div className="flex-1 min-w-0">
-              <p className="font-semibold text-sm">Weekly Schedule</p>
+              <p className="font-semibold text-sm">Template Upload Reminder</p>
               <p className="text-xs text-muted-foreground mt-1">
-                Next automated run: Tomorrow at 00:00 UTC
+                You can upload a custom report template. If none is uploaded, the default template will be used.
               </p>
             </div>
           </div>
@@ -37,69 +78,65 @@ export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-card border border-border rounded-lg p-4">
-          <p className="text-xs text-muted-foreground mb-1">Counties Processed</p>
-          <p className="text-2xl font-bold">32/47</p>
-        </div>
-        <div className="bg-card border border-border rounded-lg p-4">
-          <p className="text-xs text-muted-foreground mb-1">Last Generation</p>
-          <p className="text-2xl font-bold">Dec 9</p>
-        </div>
-        <div className="bg-card border border-border rounded-lg p-4">
-          <p className="text-xs text-muted-foreground mb-1">Success Rate</p>
-          <p className="text-2xl font-bold text-primary">98.2%</p>
-        </div>
-        <div className="bg-card border border-border rounded-lg p-4">
-          <p className="text-xs text-muted-foreground mb-1">Pending</p>
-          <p className="text-2xl font-bold text-accent">15</p>
-        </div>
+        <StatCard
+          label="Counties Processed"
+          value={`${stats.countiesProcessed} / ${stats.totalCounties}`}
+        />
+        <StatCard
+          label="Last Generation"
+          value={stats.lastGeneration}
+        />
+        <StatCard
+          label="All Reports Done"
+          value={stats.allReportsDone}
+        />
       </div>
 
       {/* Main Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Processing Pipeline */}
+        {/* Workflow Steps with Progress */}
         <div className="lg:col-span-2 bg-card border border-border rounded-lg p-6">
-          <h2 className="text-lg font-semibold mb-4">Weekly Batch Processing</h2>
-          <div className="space-y-4">
-            <div>
-              <div className="flex justify-between text-sm mb-2">
-                <span>Progress</span>
-                <span className="font-semibold">68%</span>
-              </div>
-              <div className="w-full bg-muted rounded-full h-2">
-                <div className="bg-primary h-2 rounded-full" style={{ width: "68%" }} />
-              </div>
-            </div>
+          <h2 className="text-lg font-semibold mb-4">Report Generation Process</h2>
 
-            {/* Steps */}
-            <div className="space-y-3 mt-6">
-              {[
-                { name: "Fetch GFS Data", status: "done" },
-                { name: "Parse GRIB Files", status: "done" },
-                { name: "Spatial Aggregation", status: "active" },
-                { name: "Generate Maps", status: "pending" },
-                { name: "Create PDFs", status: "pending" },
-              ].map((step, idx) => (
-                <div key={idx} className="flex items-center gap-3">
-                  <div
-                    className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0 ${
-                      step.status === "done"
-                        ? "bg-green-900/40 text-green-400"
-                        : step.status === "active"
-                          ? "bg-primary/30 text-primary"
-                          : "bg-muted text-muted-foreground"
+          {/* Progress Bar */}
+          <div className="mb-4">
+            <div className="flex justify-between text-sm mb-2">
+              <span>Progress</span>
+              <span className="font-semibold">{activeIndex + 1} / {steps.length}</span>
+            </div>
+            <div className="w-full bg-muted rounded-full h-2">
+              <div
+                className="bg-primary h-2 rounded-full"
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
+          </div>
+
+          {/* Steps */}
+          <div className="space-y-3">
+            {steps.map((step, i) => {
+              const completed = i <= activeIndex
+              return (
+                <div key={step.key} className="flex items-center gap-3">
+                  {completed ? (
+                    <CheckCircle className="w-5 h-5 text-green-600" />
+                  ) : (
+                    <Circle className="w-5 h-5 text-gray-400" />
+                  )}
+                  <span
+                    className={`text-gray-400 font-medium transition-all ${
+                      completed ? "text-base md:text-lg font-semibold" : "text-sm"
                     }`}
                   >
-                    {step.status === "done" ? "✓" : step.status === "active" ? "→" : "○"}
-                  </div>
-                  <span className="text-sm">{step.name}</span>
+                    {step.label}
+                  </span>
                 </div>
-              ))}
-            </div>
+              )
+            })}
           </div>
         </div>
 
-        {/* Sidebar Actions */}
+        {/* Sidebar Quick Actions + App Usage */}
         <div className="space-y-4">
           {/* Quick Actions */}
           <div className="bg-card border border-border rounded-lg p-6">
@@ -126,32 +163,31 @@ export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
             </div>
           </div>
 
-          {/* System Health */}
+          {/* App Usage */}
           <div className="bg-card border border-border rounded-lg p-6">
-            <h3 className="font-semibold mb-4">System Health</h3>
-            <div className="space-y-4 text-sm">
-              <div>
-                <div className="flex justify-between mb-2">
-                  <span className="text-muted-foreground">GRIB Storage</span>
-                  <span className="font-semibold">847 GB / 1 TB</span>
-                </div>
-                <div className="w-full bg-muted rounded-full h-2">
-                  <div className="bg-primary h-2 rounded-full" style={{ width: "85%" }} />
-                </div>
+            <h3 className="font-semibold mb-4">App Usage</h3>
+            <div className="space-y-3 text-sm">
+              <div className="flex justify-between">
+                <span>Reports Generated</span>
+                <span className="font-semibold">{stats.userReportsGenerated}</span>
               </div>
-              <div>
-                <div className="flex justify-between mb-2">
-                  <span className="text-muted-foreground">Uptime</span>
-                  <span className="font-semibold">99.8%</span>
-                </div>
-                <div className="w-full bg-muted rounded-full h-2">
-                  <div className="bg-green-600 h-2 rounded-full" style={{ width: "99.8%" }} />
-                </div>
+              <div className="flex justify-between">
+                <span>Your Last Activity</span>
+                <span className="font-semibold">{stats.lastGeneration}</span>
               </div>
             </div>
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+function StatCard({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="bg-card border border-border rounded-lg p-4">
+      <p className="text-xs text-muted-foreground mb-1">{label}</p>
+      <p className="text-2xl font-bold">{value}</p>
     </div>
   )
 }
