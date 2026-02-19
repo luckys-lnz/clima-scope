@@ -1,153 +1,182 @@
 "use client"
 
-import { BarChart3, AlertTriangle, CheckCircle, Clock, ArrowRight } from "lucide-react"
+import { useEffect, useState } from "react"
+import { CheckCircle, Circle, Database, Calendar } from "lucide-react"
+
+import { DashboardOverviewData } from "@/lib/models/dashboard"
+import { DashboardService } from "@/lib/services/dashboardService"
+import { AlertCard } from "@/components/ui/alert-card"
+import { InfoCard } from "@/components/ui/info-card"
+import { ActionButton } from "@/components/ui/action-button"
+import { SecondaryButton } from "@/components/ui/secondary-button"
+import { UsageRow } from "@/components/ui/usage-row"
+import { StatCard } from "@/components/stat-card"
+import { formatRelativeDate } from "@/lib/utils/date"
 
 interface DashboardOverviewProps {
   onNavigate: (screen: string) => void
 }
 
 export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
+  const [data, setData] = useState<DashboardOverviewData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    async function fetchDashboard() {
+      try {
+        setLoading(true)
+
+        const token = localStorage.getItem("access_token")
+        if (!token) throw new Error("No token")
+
+        const result = await DashboardService.getOverview(token)
+        setData(result)
+      } catch (e: any) {
+        setError(e.message || "Error")
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchDashboard()
+  }, [])
+
+  if (loading) return <div className="p-6">Loading dashboard…</div>
+  if (error || !data) return <div className="p-6 text-red-500">{error || "No data"}</div>
+
+  const { stats, workflow_step } = data
+
+  const steps = [
+    { key: "uploaded", label: "Upload Observation Data" },
+    { key: "aggregated", label: "Spatial Aggregation" },
+    { key: "mapped", label: "Generate Map" },
+    { key: "generated", label: "Generate Report" },
+  ] as const
+
+  const activeIndex =
+    workflow_step !== null
+      ? steps.findIndex((s) => s.key === workflow_step)
+      : -1
+
+  const progressPercent =
+    activeIndex >= 0 ? ((activeIndex + 1) / steps.length) * 100 : 0
+
+  const lastGenRelative = formatRelativeDate(stats.lastGeneration)
+
   return (
     <div className="p-6 space-y-6">
-      {/* Alert Cards */}
+      {/* Alerts */}
       <div className="space-y-3">
-        <div className="bg-amber-900/20 border border-amber-700/40 rounded-lg p-4">
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
-            <div className="flex-1 min-w-0">
-              <p className="font-semibold text-sm">GRIB Data Mismatch</p>
-              <p className="text-xs text-muted-foreground mt-1">
-                GFS data from Dec 8 missing 4 wards. Archive data restored.
-              </p>
-            </div>
-          </div>
-        </div>
-        <div className="bg-blue-900/20 border border-blue-700/40 rounded-lg p-4">
-          <div className="flex items-start gap-3">
-            <Clock className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
-            <div className="flex-1 min-w-0">
-              <p className="font-semibold text-sm">Weekly Schedule</p>
-              <p className="text-xs text-muted-foreground mt-1">
-                Next automated run: Tomorrow at 00:00 UTC
-              </p>
-            </div>
-          </div>
-        </div>
+        <AlertCard
+          title="Observation Data Reminder"
+          text="Make sure your observation data for your county is uploaded and complete for this week."
+        />
+        <InfoCard
+          title="Template Upload Reminder"
+          text="You can upload a custom report template. If none is uploaded, the default template will be used."
+        />
       </div>
 
-      {/* Stats Grid */}
+      {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-card border border-border rounded-lg p-4">
-          <p className="text-xs text-muted-foreground mb-1">Counties Processed</p>
-          <p className="text-2xl font-bold">32/47</p>
-        </div>
-        <div className="bg-card border border-border rounded-lg p-4">
-          <p className="text-xs text-muted-foreground mb-1">Last Generation</p>
-          <p className="text-2xl font-bold">Dec 9</p>
-        </div>
-        <div className="bg-card border border-border rounded-lg p-4">
-          <p className="text-xs text-muted-foreground mb-1">Success Rate</p>
-          <p className="text-2xl font-bold text-primary">98.2%</p>
-        </div>
-        <div className="bg-card border border-border rounded-lg p-4">
-          <p className="text-xs text-muted-foreground mb-1">Pending</p>
-          <p className="text-2xl font-bold text-accent">15</p>
-        </div>
+        <StatCard
+          label="Counties Processed"
+          value={`${stats.countiesProcessed} / ${stats.totalCounties}`}
+          icon={Database}
+          status="neutral"
+        />
+        <StatCard
+          label="Last Generation"
+          value={lastGenRelative}
+          icon={Calendar}
+          status="neutral"
+        />
+        <StatCard
+          label="All Reports Done"
+          value={stats.allReportsDone.toString()}
+          icon={CheckCircle}
+          status="neutral"
+        />
       </div>
 
-      {/* Main Grid */}
+      {/* Main */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Processing Pipeline */}
         <div className="lg:col-span-2 bg-card border border-border rounded-lg p-6">
-          <h2 className="text-lg font-semibold mb-4">Weekly Batch Processing</h2>
-          <div className="space-y-4">
-            <div>
-              <div className="flex justify-between text-sm mb-2">
-                <span>Progress</span>
-                <span className="font-semibold">68%</span>
-              </div>
-              <div className="w-full bg-muted rounded-full h-2">
-                <div className="bg-primary h-2 rounded-full" style={{ width: "68%" }} />
-              </div>
-            </div>
+          <h2 className="text-lg font-semibold mb-4">
+            Report Generation Process
+          </h2>
 
-            {/* Steps */}
-            <div className="space-y-3 mt-6">
-              {[
-                { name: "Fetch GFS Data", status: "done" },
-                { name: "Parse GRIB Files", status: "done" },
-                { name: "Spatial Aggregation", status: "active" },
-                { name: "Generate Maps", status: "pending" },
-                { name: "Create PDFs", status: "pending" },
-              ].map((step, idx) => (
-                <div key={idx} className="flex items-center gap-3">
-                  <div
-                    className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0 ${
-                      step.status === "done"
-                        ? "bg-green-900/40 text-green-400"
-                        : step.status === "active"
-                          ? "bg-primary/30 text-primary"
-                          : "bg-muted text-muted-foreground"
+          {/* Progress */}
+          <div className="mb-4">
+            <div className="flex justify-between text-sm mb-2">
+              <span>Progress</span>
+              <span className="font-semibold">
+                {activeIndex + 1} / {steps.length}
+              </span>
+            </div>
+            <div className="w-full bg-muted rounded-full h-2">
+              <div
+                className="bg-primary h-2 rounded-full transition-all"
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
+          </div>
+
+          {/* Steps */}
+          <div className="space-y-3">
+            {steps.map((step, i) => {
+              const completed = i <= activeIndex
+              return (
+                <div key={step.key} className="flex items-center gap-3">
+                  {completed ? (
+                    <CheckCircle className="w-5 h-5 text-green-600" />
+                  ) : (
+                    <Circle className="w-5 h-5 text-gray-400" />
+                  )}
+                  <span
+                    className={`font-medium ${
+                      completed
+                        ? "text-base md:text-lg font-semibold"
+                        : "text-sm text-gray-400"
                     }`}
                   >
-                    {step.status === "done" ? "✓" : step.status === "active" ? "→" : "○"}
-                  </div>
-                  <span className="text-sm">{step.name}</span>
+                    {step.label}
+                  </span>
                 </div>
-              ))}
-            </div>
+              )
+            })}
           </div>
         </div>
 
-        {/* Sidebar Actions */}
+        {/* Sidebar */}
         <div className="space-y-4">
-          {/* Quick Actions */}
           <div className="bg-card border border-border rounded-lg p-6">
             <h3 className="font-semibold mb-4">Quick Actions</h3>
             <div className="space-y-2">
-              <button
-                onClick={() => onNavigate("generate")}
-                className="w-full bg-primary text-primary-foreground py-2 px-4 rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors flex items-center justify-center gap-2"
-              >
-                Generate Reports <ArrowRight className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => onNavigate("archive")}
-                className="w-full bg-muted text-foreground py-2 px-4 rounded-lg text-sm font-medium hover:bg-muted/80 transition-colors"
-              >
+              <ActionButton onClick={() => onNavigate("generate")}>
+                Generate Reports
+              </ActionButton>
+              <SecondaryButton onClick={() => onNavigate("archive")}>
                 View Archive
-              </button>
-              <button
-                onClick={() => onNavigate("logs")}
-                className="w-full bg-muted text-foreground py-2 px-4 rounded-lg text-sm font-medium hover:bg-muted/80 transition-colors"
-              >
+              </SecondaryButton>
+              <SecondaryButton onClick={() => onNavigate("logs")}>
                 View Logs
-              </button>
+              </SecondaryButton>
             </div>
           </div>
 
-          {/* System Health */}
           <div className="bg-card border border-border rounded-lg p-6">
-            <h3 className="font-semibold mb-4">System Health</h3>
-            <div className="space-y-4 text-sm">
-              <div>
-                <div className="flex justify-between mb-2">
-                  <span className="text-muted-foreground">GRIB Storage</span>
-                  <span className="font-semibold">847 GB / 1 TB</span>
-                </div>
-                <div className="w-full bg-muted rounded-full h-2">
-                  <div className="bg-primary h-2 rounded-full" style={{ width: "85%" }} />
-                </div>
-              </div>
-              <div>
-                <div className="flex justify-between mb-2">
-                  <span className="text-muted-foreground">Uptime</span>
-                  <span className="font-semibold">99.8%</span>
-                </div>
-                <div className="w-full bg-muted rounded-full h-2">
-                  <div className="bg-green-600 h-2 rounded-full" style={{ width: "99.8%" }} />
-                </div>
-              </div>
+            <h3 className="font-semibold mb-4">App Usage</h3>
+            <div className="space-y-3 text-sm">
+              <UsageRow
+                label="Reports Generated"
+                value={stats.userReportsGenerated}
+              />
+              <UsageRow
+                label="Your Last Activity"
+                value={lastGenRelative}
+              />
             </div>
           </div>
         </div>

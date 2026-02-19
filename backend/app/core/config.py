@@ -53,7 +53,6 @@ class Settings(BaseSettings):
         description="Supabase anonymous key (for frontend operations)"
     )
     
-    # Optional: Supabase Storage bucket name
     SUPABASE_STORAGE_BUCKET: str = Field(
         default="weather-reports",
         env="SUPABASE_STORAGE_BUCKET",

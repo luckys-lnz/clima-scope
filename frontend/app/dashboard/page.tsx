@@ -2,7 +2,18 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { BarChart3, FileText, Archive, Activity, Upload, Settings, MapPin, Menu, X, LogOut } from "lucide-react"
+import {
+  BarChart3,
+  FileText,
+  Archive,
+  Upload,
+  Settings,
+  MapPin,
+  Menu,
+  X,
+  LogOut,
+} from "lucide-react"
+
 import { DashboardOverview } from "@/components/ui-panels/dashboard-overview"
 import { ManualGeneration } from "@/components/ui-panels/manual-generation"
 import { ReportArchive } from "@/components/ui-panels/report-archive"
@@ -17,30 +28,27 @@ export default function Dashboard() {
   const [selectedCounty, setSelectedCounty] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [isLoggingOut, setIsLoggingOut] = useState(false)
+  const [userMenuOpen, setUserMenuOpen] = useState(false)
 
   const handleLogout = async () => {
     setIsLoggingOut(true)
     try {
-      // Clear local storage
+      const token = localStorage.getItem("access_token")
+
       localStorage.removeItem("access_token")
       localStorage.removeItem("refresh_token")
       localStorage.removeItem("user")
-      
-      // Optional: Call backend logout
-      const token = localStorage.getItem("access_token") // Get before clearing
+
       if (token) {
         await fetch("http://localhost:8000/api/v1/auth/logout", {
           method: "POST",
-          headers: { "Authorization": `Bearer ${token}` }
+          headers: { Authorization: `Bearer ${token}` },
         })
       }
-      
-      // Use replace, not push
+
       window.location.replace("/sign-in")
-      
     } catch (error) {
       console.error("Logout error:", error)
-      // Still replace on error
       window.location.replace("/sign-in")
     }
   }
@@ -56,7 +64,13 @@ export default function Dashboard() {
   const renderScreen = () => {
     switch (currentScreen) {
       case "dashboard":
-        return <DashboardOverview onNavigate={(screen: string) => setCurrentScreen(screen as Screen)} />
+        return (
+          <DashboardOverview
+            onNavigate={(screen: string) =>
+              setCurrentScreen(screen as Screen)
+            }
+          />
+        )
       case "generate":
         return <ManualGeneration onBack={() => setCurrentScreen("dashboard")} />
       case "archive":
@@ -68,11 +82,19 @@ export default function Dashboard() {
           />
         )
       case "config":
-        return <SystemConfiguration onBack={() => setCurrentScreen("dashboard")} />
+        return (
+          <SystemConfiguration onBack={() => setCurrentScreen("dashboard")} />
+        )
       case "upload":
         return <DataUpload onBack={() => setCurrentScreen("dashboard")} />
       default:
-        return <DashboardOverview onNavigate={(screen: string) => setCurrentScreen(screen as Screen)} />
+        return (
+          <DashboardOverview
+            onNavigate={(screen: string) =>
+              setCurrentScreen(screen as Screen)
+            }
+          />
+        )
     }
   }
 
@@ -89,9 +111,12 @@ export default function Dashboard() {
 
   return (
     <div className="flex h-screen bg-background">
-      {/* Mobile menu overlay */}
+      {/* Mobile overlay */}
       {sidebarOpen && (
-        <div className="fixed inset-0 z-30 bg-black/50 md:hidden" onClick={() => setSidebarOpen(false)} />
+        <div
+          className="fixed inset-0 z-30 bg-black/50 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
       )}
 
       {/* Sidebar */}
@@ -104,7 +129,7 @@ export default function Dashboard() {
           <MapPin className="w-6 h-6 text-primary" />
           <div>
             <h1 className="font-bold text-lg">Clima Scope</h1>
-            <p className="text-xs text-muted-foreground">County Reports</p>
+            <p className="text-xs text-muted-foreground">Mombasa County</p>
           </div>
         </div>
 
@@ -131,56 +156,63 @@ export default function Dashboard() {
             )
           })}
         </nav>
-
-        <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-border">
-          <div className="text-xs text-muted-foreground">
-            <p className="mb-3 font-semibold">System Status</p>
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-green-500" />
-                <span>Pipeline Active</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-green-500" />
-                <span>Data Updated</span>
-              </div>
-            </div>
-          </div>
-        </div>
       </aside>
 
-      {/* Main Content */}
+      {/* Main */}
       <main className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}
         <header className="bg-card border-b border-border sticky top-0 z-20">
           <div className="flex items-center justify-between px-4 md:px-8 py-4">
+            {/* Left */}
             <div className="flex items-center gap-4">
               <button
                 onClick={() => setSidebarOpen(!sidebarOpen)}
                 className="md:hidden p-2 hover:bg-muted rounded-lg"
               >
-                {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-              </button>
-              <h2 className="text-2xl font-bold">{getTitle(currentScreen as string)}</h2>
-            </div>
-            <div className="flex items-center gap-4">
-              <button
-                onClick={handleLogout}
-                disabled={isLoggingOut}
-                className="flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isLoggingOut ? (
-                  <div className="w-4 h-4 border-2 border-red-600 border-t-transparent rounded-full animate-spin" />
+                {sidebarOpen ? (
+                  <X className="w-5 h-5" />
                 ) : (
-                  <LogOut className="w-4 h-4" />
+                  <Menu className="w-5 h-5" />
                 )}
-                <span>{isLoggingOut ? "Logging out..." : "Logout"}</span>
               </button>
+              <h2 className="text-2xl font-bold">
+                {getTitle(currentScreen as string)}
+              </h2>
+            </div>
+
+            {/* Right: Avatar vertical */}
+            <div className="relative flex flex-col items-center">
+              {/* Avatar ONLY clickable */}
+              <button
+                onClick={() => setUserMenuOpen((s) => !s)}
+                className="w-9 h-9 rounded-full border border-gray-400 flex items-center justify-center text-gray-400 font-semibold hover:bg-muted transition-colors"
+              >
+                U
+              </button>
+
+              {/* Welcome text NOT clickable */}
+              <span className="text-xs text-muted-foreground mt-1">
+                Welcome, Username
+              </span>
+
+              {/* Dropdown */}
+              {userMenuOpen && (
+                <div className="absolute right-0 top-12 w-36 bg-card border border-border rounded-lg shadow-lg z-50">
+                  <button
+                    onClick={handleLogout}
+                    disabled={isLoggingOut}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    {isLoggingOut ? "Logging out…" : "Logout"}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </header>
 
-        {/* Page Content */}
+        {/* Content */}
         <div className="flex-1 overflow-auto">
           <div className="min-h-full">{renderScreen()}</div>
         </div>

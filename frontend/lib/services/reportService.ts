@@ -1,0 +1,55 @@
+import { ReportArchiveItem } from "@/lib/models/report"
+import { getAuthHeaders, handleTokenExpired } from "@/lib/utils/auth"
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+
+export class ReportService {
+  /**
+   * Fetch all reports for the current user
+   */
+  static async getReports(token: string): Promise<ReportArchiveItem[]> {
+    const res = await fetch(`${API_BASE}/api/v1/reports`, {
+      headers: getAuthHeaders(token),
+    })
+
+    if (res.status === 401) {
+      handleTokenExpired()
+    }
+
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({}))
+      throw new Error(error.detail || "Failed to load reports")
+    }
+
+    return res.json()
+  }
+
+  /**
+   * Download a report PDF via secure backend route
+   */
+  static async downloadReport(token: string, reportId: string) {
+    const res = await fetch(`${API_BASE}/api/v1/reports/download/${reportId}`, {
+      headers: getAuthHeaders(token),
+    })
+
+    if (res.status === 401) {
+      handleTokenExpired()
+    }
+
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({}))
+      throw new Error(error.detail || "Failed to download report")
+    }
+
+    // Convert to blob for download
+    const blob = await res.blob()
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `${reportId}.pdf`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    window.URL.revokeObjectURL(url)
+  }
+}
