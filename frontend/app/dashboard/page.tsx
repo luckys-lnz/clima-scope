@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import {
   BarChart3,
@@ -19,6 +19,7 @@ import { ManualGeneration } from "@/components/ui-panels/manual-generation"
 import { ReportArchive } from "@/components/ui-panels/report-archive"
 import { SystemConfiguration } from "@/components/ui-panels/system-configuration"
 import { DataUpload } from "@/components/data-upload"
+import { authService } from "@/lib/services/authService"
 
 type Screen = "dashboard" | "generate" | "archive" | "config" | "upload"
 
@@ -29,26 +30,28 @@ export default function Dashboard() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [isLoggingOut, setIsLoggingOut] = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
+  const [user, setUser] = useState<{ username: string; county: string } | null>(null)
+
+  // Fetch user session
+  useEffect(() => {
+    authService.getSession().then(session => {
+      if (session?.user) {
+        setUser({
+          username: session.user.full_name || "Unknown",
+          county: session.user.county || "Unknown",
+        })
+      }
+    })
+  }, [])
 
   const handleLogout = async () => {
     setIsLoggingOut(true)
     try {
       const token = localStorage.getItem("access_token")
-
-      localStorage.removeItem("access_token")
-      localStorage.removeItem("refresh_token")
-      localStorage.removeItem("user")
-
-      if (token) {
-        await fetch("http://localhost:8000/api/v1/auth/logout", {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-        })
-      }
-
-      window.location.replace("/sign-in")
+      if (token) await authService.logout(token)
     } catch (error) {
       console.error("Logout error:", error)
+    } finally {
       window.location.replace("/sign-in")
     }
   }
@@ -129,7 +132,9 @@ export default function Dashboard() {
           <MapPin className="w-6 h-6 text-primary" />
           <div>
             <h1 className="font-bold text-lg">Clima Scope</h1>
-            <p className="text-xs text-muted-foreground">Mombasa County</p>
+            <p className="text-xs text-muted-foreground">
+              {user?.county || "—"} County
+            </p>
           </div>
         </div>
 
@@ -182,17 +187,15 @@ export default function Dashboard() {
 
             {/* Right: Avatar vertical */}
             <div className="relative flex flex-col items-center">
-              {/* Avatar ONLY clickable */}
               <button
                 onClick={() => setUserMenuOpen((s) => !s)}
                 className="w-9 h-9 rounded-full border border-gray-400 flex items-center justify-center text-gray-400 font-semibold hover:bg-muted transition-colors"
               >
-                U
+                {user?.username[0]?.toUpperCase() || "U"}
               </button>
 
-              {/* Welcome text NOT clickable */}
               <span className="text-xs text-muted-foreground mt-1">
-                Welcome, Username
+                Welcome, {user?.username || "User"}
               </span>
 
               {/* Dropdown */}
