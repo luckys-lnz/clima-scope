@@ -9,25 +9,41 @@ function getToken(): string {
   return token
 }
 
+export interface ReportingPeriod {
+  report_week: number
+  report_year: number
+  report_start_at: string // YYYY-MM-DD
+  report_end_at: string   // YYYY-MM-DD
+}
+
 export const uploadService = {
   // -----------------------
   // UPLOAD FILES
   // -----------------------
-  uploadFiles: async (files: File[] | File, file_type = "observations"): Promise<Upload[]> => {
+  uploadFiles: async (
+    files: File[] | File,
+    file_type = "observations",
+    period: ReportingPeriod
+  ): Promise<Upload[]> => {
     const token = getToken()
 
     const formData = new FormData()
     formData.append("file_type", file_type)
 
+    // ✅ reporting period
+    formData.append("report_week", String(period.report_week))
+    formData.append("report_year", String(period.report_year))
+    formData.append("report_start_at", period.report_start_at)
+    formData.append("report_end_at", period.report_end_at)
+
+    // files
     if (Array.isArray(files)) {
-      files.forEach((f) => {
-        formData.append("files", f)
-      })
+      files.forEach((f) => formData.append("files", f))
     } else {
       formData.append("files", files)
     }
 
-    const response = await fetch(`${API_BASE}/api/v1/uploads`, {
+    const response = await fetch(`${API_BASE}/api/v1/uploads/`, {
       method: "POST",
       body: formData,
       headers: {
@@ -48,7 +64,7 @@ export const uploadService = {
   // -----------------------
   getAll: async (): Promise<Upload[]> => {
     const token = getToken()
-    const response = await fetch(`${API_BASE}/api/v1/uploads`, {
+    const response = await fetch(`${API_BASE}/api/v1/uploads/`, {
       method: "GET",
       headers: { Authorization: `Bearer ${token}` },
     })
