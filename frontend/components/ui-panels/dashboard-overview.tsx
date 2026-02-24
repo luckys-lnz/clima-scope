@@ -62,7 +62,9 @@ export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
   const progressPercent =
     activeIndex >= 0 ? ((activeIndex + 1) / steps.length) * 100 : 0
 
-  const lastGenRelative = formatRelativeDate(stats.lastGeneration)
+  const lastGenRelative = stats.lastGeneration
+    ? formatRelativeDate(stats.lastGeneration)
+    : "None"
 
   return (
     <div className="p-6 space-y-6">
@@ -174,7 +176,7 @@ export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
                 value={stats.userReportsGenerated}
               />
               <UsageRow
-                label="Your Last Activity"
+                label="Last Activity"
                 value={lastGenRelative}
               />
             </div>
