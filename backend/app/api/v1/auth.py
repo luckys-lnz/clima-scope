@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Form
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from datetime import datetime
-import uuid
+from typing import Optional
 
 from app.schemas.auth import (
     SignupRequest,
@@ -10,135 +10,161 @@ from app.schemas.auth import (
     UserResponse,
     ProfileUpdateRequest,
 )
-from app.core.supabase import get_auth_client, get_db_client
+from app.core.supabase import get_supabase_admin, get_supabase_anon
 
 router = APIRouter(tags=["authentication"])
 security = HTTPBearer()
-
-# Get client instances
-supabase_auth = get_auth_client()
-supabase_db = get_db_client()
 
 # -----------------------------
 # Dependency: Get current user
 # -----------------------------
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    user_data = await supabase_auth.get_user(credentials.credentials)
+    supabase = get_supabase_anon()
     
-    if not user_data or not user_data.get("id"):
+    try:
+        user = supabase.auth.get_user(credentials.credentials)
+        if not user or not user.user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid authentication credentials",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        return user.user
+    except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication credentials",
+            detail=f"Authentication failed: {str(e)}",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
-    return user_data
 
 # -----------------------------
-# Signup
+# SIGNUP - No session returned (email verification required)
 # -----------------------------
-@router.post("/signup", response_model=AuthResponse)
+@router.post("/signup")
 async def signup(user_data: SignupRequest):
-    # Create auth user
-    auth_resp = await supabase_auth.sign_up(
-        user_data.email, 
-        user_data.password
-    )
-
-    user = auth_resp.get("user", {})
-    if not user:
-        raise HTTPException(status_code=400, detail="Signup failed - no user returned")
-
-    # Create profile in profiles table
+    supabase_admin = get_supabase_admin()
+    
     try:
-        await supabase_db.insert("profiles", {
-            "id": user.get("id"),
-            "full_name": user_data.full_name,
-            "organization": user_data.organization,
-            "county": user_data.county,
-            "phone": user_data.phone,
+        # Create auth user
+        auth_resp = supabase_admin.auth.sign_up({
+            "email": user_data.email,
+            "password": user_data.password
         })
-    except Exception as e:
-        print(f"Profile creation failed: {e}")
 
-    return AuthResponse(
-        success=True,
-        access_token=auth_resp.get("access_token", ""),
-        refresh_token=auth_resp.get("refresh_token", ""),
-        expires_in=3600,
-        user=UserResponse(
-            id=user.get("id"),
-            email=user_data.email,
-            full_name=user_data.full_name,
-            organization=user_data.organization,
-            county=user_data.county,
-            phone=user_data.phone,
-        ),
-    )
+        if not auth_resp.user:
+            raise HTTPException(status_code=400, detail="Signup failed")
+
+        # Create profile
+        try:
+            supabase_admin.table("profiles").insert({
+                "id": auth_resp.user.id,
+                "full_name": user_data.full_name,
+                "organization": user_data.organization,
+                "county": user_data.county,
+                "phone": user_data.phone,
+                "created_at": datetime.utcnow().isoformat()
+            }).execute()
+        except Exception as e:
+            # Rollback user creation if profile fails
+            supabase_admin.auth.admin.delete_user(auth_resp.user.id)
+            raise HTTPException(status_code=400, detail=f"Profile creation failed: {str(e)}")
+
+        return {
+            "success": True,
+            "message": "Please check your email to verify your account",
+            "user": {
+                "id": auth_resp.user.id,
+                "email": user_data.email,
+                "full_name": user_data.full_name,
+                "organization": user_data.organization,
+                "county": user_data.county,
+                "phone": user_data.phone
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Signup failed: {str(e)}")
 
 # -----------------------------
-# Login
+# LOGIN - Returns session (user must be verified)
 # -----------------------------
 @router.post("/login", response_model=AuthResponse)
 async def login(user_data: LoginRequest):
-    auth_resp = await supabase_auth.sign_in(
-        user_data.email, 
-        user_data.password
-    )
-
-    user = auth_resp.get("user", {})
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-
-    # Get user profile
+    supabase = get_supabase_anon()
+    
     try:
-        profiles = await supabase_db.select(
-            "profiles", 
-            filters={"id": f"eq.{user.get('id')}"}
-        )
-        profile = profiles[0] if profiles else {}
-    except:
-        profile = {}
+        auth_resp = supabase.auth.sign_in_with_password({
+            "email": user_data.email,
+            "password": user_data.password
+        })
 
-    return AuthResponse(
-        success=True,
-        access_token=auth_resp.get("access_token", ""),
-        refresh_token=auth_resp.get("refresh_token", ""),
-        expires_in=3600,
-        user=UserResponse(
-            id=user.get("id"),
-            email=user.get("email", user_data.email),
-            full_name=profile.get("full_name", ""),
-            organization=profile.get("organization", ""),
-            county=profile.get("county"),
-            phone=profile.get("phone"),
-        ),
-    )
+        if not auth_resp.user:
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+
+        # Check if email is verified
+        if not auth_resp.user.email_confirmed_at:
+            raise HTTPException(
+                status_code=401, 
+                detail="Please verify your email before logging in"
+            )
+
+        # Get user profile
+        try:
+            profiles = supabase.table("profiles")\
+                .select("*")\
+                .eq("id", auth_resp.user.id)\
+                .execute()
+            profile = profiles.data[0] if profiles.data else {}
+        except:
+            profile = {}
+
+        return AuthResponse(
+            success=True,
+            access_token=auth_resp.session.access_token,
+            refresh_token=auth_resp.session.refresh_token,
+            expires_in=auth_resp.session.expires_in,
+            user=UserResponse(
+                id=auth_resp.user.id,
+                email=auth_resp.user.email,
+                full_name=profile.get("full_name", ""),
+                organization=profile.get("organization", ""),
+                county=profile.get("county"),
+                phone=profile.get("phone"),
+            )
+        )
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=str(e))
 
 # -----------------------------
-# Logout
+# LOGOUT
 # -----------------------------
 @router.post("/logout")
 async def logout(user=Depends(get_current_user)):
-    return {"success": True, "message": "Logged out successfully"}
+    supabase = get_supabase_anon()
+    try:
+        supabase.auth.sign_out()
+        return {"success": True, "message": "Logged out successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Logout failed: {str(e)}")
 
 # -----------------------------
-# Get current user profile
+# GET CURRENT USER
 # -----------------------------
 @router.get("/me", response_model=UserResponse)
 async def get_current_user_profile(user=Depends(get_current_user)):
+    supabase = get_supabase_anon()
+    
     try:
-        profiles = await supabase_db.select(
-            "profiles", 
-            filters={"id": f"eq.{user.get('id')}"}
-        )
-        profile = profiles[0] if profiles else {}
+        profiles = supabase.table("profiles")\
+            .select("*")\
+            .eq("id", user.id)\
+            .execute()
+        profile = profiles.data[0] if profiles.data else {}
     except:
         profile = {}
     
     return UserResponse(
-        id=user.get("id"),
-        email=user.get("email", ""),
+        id=user.id,
+        email=user.email,
         full_name=profile.get("full_name", ""),
         organization=profile.get("organization", ""),
         county=profile.get("county"),
@@ -146,32 +172,36 @@ async def get_current_user_profile(user=Depends(get_current_user)):
     )
 
 # -----------------------------
-# Update profile
+# UPDATE PROFILE
 # -----------------------------
 @router.put("/profile", response_model=UserResponse)
 async def update_profile(updates: ProfileUpdateRequest, user=Depends(get_current_user)):
+    supabase = get_supabase_anon()
+    
     update_data = updates.model_dump(exclude_unset=True, exclude_none=True)
     
     if update_data:
-        await supabase_db.update(
-            "profiles", 
-            update_data, 
-            filters={"id": f"eq.{user.get('id')}"}
-        )
+        try:
+            supabase.table("profiles")\
+                .update(update_data)\
+                .eq("id", user.id)\
+                .execute()
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Profile update failed: {str(e)}")
     
     # Get updated profile
     try:
-        profiles = await supabase_db.select(
-            "profiles", 
-            filters={"id": f"eq.{user.get('id')}"}
-        )
-        profile = profiles[0] if profiles else {}
+        profiles = supabase.table("profiles")\
+            .select("*")\
+            .eq("id", user.id)\
+            .execute()
+        profile = profiles.data[0] if profiles.data else {}
     except:
         profile = {}
     
     return UserResponse(
-        id=user.get("id"),
-        email=user.get("email", ""),
+        id=user.id,
+        email=user.email,
         full_name=profile.get("full_name", ""),
         organization=profile.get("organization", ""),
         county=profile.get("county"),
@@ -179,13 +209,18 @@ async def update_profile(updates: ProfileUpdateRequest, user=Depends(get_current
     )
 
 # -----------------------------
-# Refresh token
+# REFRESH TOKEN
 # -----------------------------
 @router.post("/refresh")
 async def refresh_token(refresh_token: str = Form(...)):
-    result = await supabase_auth.refresh_session(refresh_token)
-    return {
-        "access_token": result.get("access_token", ""),
-        "refresh_token": result.get("refresh_token", ""),
-        "expires_in": result.get("expires_in", 3600),
-    }
+    supabase = get_supabase_anon()
+    
+    try:
+        result = supabase.auth.refresh_session(refresh_token)
+        return {
+            "access_token": result.session.access_token,
+            "refresh_token": result.session.refresh_token,
+            "expires_in": result.session.expires_in,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Token refresh failed: {str(e)}")

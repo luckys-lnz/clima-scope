@@ -1,244 +1,377 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { ChevronLeft, Download, RefreshCw } from "lucide-react"
 import { motion } from "framer-motion"
-import { SelectInput } from "@/components/select-input"
 import { LogViewer } from "@/components/log-viewer"
-import { api } from "@/lib/api-client"
+import {
+  formatWeeklyReportWindow,
+  getCurrentWeeklyReportWindow,
+} from "@/lib/utils/report_date"
+import { authService } from "@/lib/services/authService"
+import { workflowService } from "@/lib/services/workflowService"
+import type { ValidationResponse } from "@/lib/models/workflow"
 
 interface ManualGenerationProps {
   onBack: () => void
 }
 
-const COUNTIES = [
-  "Nairobi",
-  "Mombasa",
-  "Kisumu",
-  "Nakuru",
-  "Eldoret",
-  "Kericho",
-  "Nyeri",
-  "Thika",
-  "Machakos",
-  "Voi",
-  "Kimalayo",
-  "Kwale",
-  "Kilifi",
-  "Lamu",
-  "Garissa",
-  "Wajir",
-  "Mandera",
-  "Isiolo",
-  "Marsabit",
-  "Turkana",
-  "Samburu",
-  "Embu",
-  "Meru",
-  "Tharaka",
-  "Kitui",
-  "Makueni",
-  "Taita",
-  "Narok",
-  "Kajiado",
-  "Bomet",
-  "Bungoma",
-  "Busia",
-  "Siaya",
-  "Kisii",
-  "Nyamira",
-  "Kiambu",
-  "Muranga",
-  "Laikipia",
-  "West Pokot",
-  "Baringo",
-  "Kabarnet",
-]
-
 export function ManualGeneration({ onBack }: ManualGenerationProps) {
-  const [selectedCounty, setSelectedCounty] = useState("")
-  const [selectedWeek, setSelectedWeek] = useState("2024-50")
-  const [includeObservations, setIncludeObservations] = useState(true)
+  // ===== WORKFLOW STATE =====
+  const [step, setStep] = useState(1)
+  const totalSteps = 4
+
+  const [userCounty, setUserCounty] = useState("")
+  const [availableVars, setAvailableVars] = useState<string[]>([])
+  const [selectedVars, setSelectedVars] = useState<string[]>([])
+  const [logs, setLogs] = useState<string[]>([])
+  const [validationResult, setValidationResult] = useState<ValidationResponse | null>(null)
+
   const [isGenerating, setIsGenerating] = useState(false)
   const [isComplete, setIsComplete] = useState(false)
-  const [logs, setLogs] = useState<string[]>([])
   const [downloadUrl, setDownloadUrl] = useState("")
   const [errorMessage, setErrorMessage] = useState("")
+  const [sessionToken, setSessionToken] = useState<string | null>(null)
 
-  const handleGenerate = async () => {
+  const reportWindow = getCurrentWeeklyReportWindow()
+
+  // ===== SESSION =====
+  useEffect(() => {
+    authService.getSession().then((session) => {
+      if (session?.user) {
+        setUserCounty(session.user.county || "")
+        setSessionToken(session.access_token)
+      }
+    })
+  }, [])
+
+  // ===== LOG HELPER =====
+  const addLog = (msg: string) => {
+    setLogs((prev) => [
+      ...prev,
+      `[${new Date().toLocaleTimeString()}] ${msg}`,
+    ])
+  }
+
+  // ===== STEP 1: VALIDATE DATA =====
+  const handleValidate = async () => {
+    if (!sessionToken) {
+      setErrorMessage("No active session")
+      return
+    }
+
+    addLog("Stage 1: Checking observation & shapefiles…")
     setIsGenerating(true)
-    setLogs([])
-    setIsComplete(false)
-    setDownloadUrl("")
     setErrorMessage("")
 
-    const newLogs = [
-      `[${new Date().toLocaleTimeString()}] Starting report generation for ${selectedCounty}...`,
-      `[${new Date().toLocaleTimeString()}] Submitting generation request...`,
-    ]
-    setLogs(newLogs)
-
     try {
-      const [yearStr, weekStr] = selectedWeek.split("-")
-      const weekNumber = Number(weekStr)
-      const year = Number(yearStr)
+      // Call backend validation using workflow service
+      const result = await workflowService.validateInputs(sessionToken)
+      
+      setValidationResult(result)
+      setAvailableVars(result.variables)
+      setStep(2)
 
-      setLogs((prev) => [...prev, `[${new Date().toLocaleTimeString()}] Generating PDF on server...`])
-
-      const response = await api.generatePDFWithOptions({
-        county_name: selectedCounty,
-        week_number: weekNumber,
-        year,
-        include_observations: includeObservations,
-      })
-
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-      setDownloadUrl(`${baseUrl}${response.pdf_url}`)
-      setLogs((prev) => [
-        ...prev,
-        `[${new Date().toLocaleTimeString()}] ✓ PDF generated: ${response.filename}`,
-      ])
-      setIsComplete(true)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to generate report"
-      setErrorMessage(message)
-      setLogs((prev) => [
-        ...prev,
-        `[${new Date().toLocaleTimeString()}] ✗ Report generation failed: ${message}`,
-      ])
+      addLog(`✓ Files found: ${result.observation_file}, ${result.shapefile}`)
+      addLog(`✓ Variables detected: ${result.variables.join(", ")}`)
+      addLog(`✓ Report period: Week ${result.report_week}, ${result.report_year}`)
+      addLog(`✓ File stats: ${result.row_count} rows, ${result.column_count} columns`)
+      addLog("Stage 1 complete")
+    } catch (e: any) {
+      const errorMsg = e.message || "Validation failed"
+      addLog(`✗ Validation failed: ${errorMsg}`)
+      setErrorMessage(errorMsg)
     } finally {
       setIsGenerating(false)
     }
   }
 
+  // ===== STEP 2: VARIABLE SELECT =====
+  const handleNextToMaps = () => {
+    addLog(`Variables selected: ${selectedVars.join(", ")}`)
+    setStep(3)
+  }
+
+  // ===== STEP 3: MAP GENERATION =====
+  const handleGenerateMaps = async () => {
+    if (!sessionToken) return
+
+    addLog("Stage 3: Generating maps…")
+    setIsGenerating(true)
+
+    try {
+      // This would be your next endpoint
+      const res = await fetch("/api/v1/workflow/generate-maps", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${sessionToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          county: userCounty,
+          variables: selectedVars,
+          report_week: reportWindow.week,
+          report_year: reportWindow.year
+        })
+      })
+
+      const data = await res.json()
+      
+      if (!res.ok) {
+        throw new Error(data.detail || "Map generation failed")
+      }
+
+      data.outputs?.forEach((o: any) =>
+        addLog(`✓ Map ready: ${o.variable}`)
+      )
+
+      setStep(4)
+      addLog("Stage 3 complete")
+    } catch (e: any) {
+      addLog(`✗ Map generation failed: ${e.message}`)
+      setErrorMessage(e.message)
+    } finally {
+      setIsGenerating(false)
+    }
+  }
+
+  // ===== STEP 4: REPORT =====
+  const handleGenerateReport = async () => {
+    if (!reportWindow || !sessionToken) return
+
+    addLog("Stage 4: Generating final report…")
+    setIsGenerating(true)
+
+    try {
+      const res = await fetch("/api/v1/workflow/generate-report", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${sessionToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          county_name: userCounty,
+          week_number: reportWindow.week,
+          year: reportWindow.year,
+          variables: selectedVars
+        })
+      })
+
+      const data = await res.json()
+      
+      if (!res.ok) {
+        throw new Error(data.detail || "Report generation failed")
+      }
+
+      const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      setDownloadUrl(`${baseUrl}${data.pdf_url}`)
+
+      addLog(`✓ Report generated: ${data.filename}`)
+      addLog("Workflow complete")
+
+      setIsComplete(true)
+    } catch (e: any) {
+      addLog(`✗ Report generation failed: ${e.message}`)
+      setErrorMessage(e.message)
+    } finally {
+      setIsGenerating(false)
+    }
+  }
+
+  // ===== UI =====
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      transition={{ duration: 0.3 }}
       className="p-4 sm:p-6 space-y-6 lg:pt-0"
     >
+      {/* BACK */}
       <motion.button
         onClick={onBack}
         whileHover={{ x: -4 }}
-        className="flex items-center gap-2 text-primary hover:text-primary/80 transition-colors mb-4"
+        className="flex items-center gap-2 text-primary"
       >
         <ChevronLeft className="w-4 h-4" />
         <span className="text-sm">Back to Dashboard</span>
       </motion.button>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
-        {/* Form Section */}
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="lg:col-span-1"
-        >
-          <div className="bg-card rounded-lg border border-border p-4 sm:p-6 space-y-4">
-            <h2 className="font-bold text-base sm:text-lg text-card-foreground">Report Parameters</h2>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* LEFT PANEL — STEPPER */}
+        <div className="lg:col-span-1">
+          <div className="bg-card rounded-lg border border-border p-6 space-y-4">
+            <h2 className="font-bold text-lg">Weekly Report</h2>
 
-            <div>
-              <label className="block text-xs sm:text-sm font-medium text-card-foreground mb-2">County</label>
-              <SelectInput
-                value={selectedCounty}
-                onChange={setSelectedCounty}
-                options={COUNTIES.map((c) => ({ value: c, label: c }))}
-                placeholder="Select county..."
-              />
+            <div className="text-xs text-muted-foreground">
+              Step {step}/{totalSteps}
             </div>
 
-            <div>
-              <label className="block text-xs sm:text-sm font-medium text-card-foreground mb-2">Week</label>
-              <SelectInput
-                value={selectedWeek}
-                onChange={setSelectedWeek}
-                options={[
-                  { value: "2024-50", label: "Week 50, 2024 (Dec 2-8)" },
-                  { value: "2024-51", label: "Week 51, 2024 (Dec 9-15)" },
-                  { value: "2024-52", label: "Week 52, 2024 (Dec 16-22)" },
-                ]}
-              />
-            </div>
+            {/* STEP 1 */}
+            {step === 1 && (
+              <>
+                <div>
+                  <label className="text-xs font-medium">County</label>
+                  <div className="bg-muted border rounded-lg px-3 py-2 text-sm">
+                    {userCounty || "—"}
+                  </div>
+                </div>
 
-            <div className="flex items-center gap-3">
-              <input
-                type="checkbox"
-                id="observations"
-                checked={includeObservations}
-                onChange={(e) => setIncludeObservations(e.target.checked)}
-                className="w-4 h-4 rounded border-border"
-              />
-              <label htmlFor="observations" className="text-xs sm:text-sm text-card-foreground">
-                Include station observations
-              </label>
-            </div>
+                <div>
+                  <label className="text-xs font-medium">
+                    Reporting Period
+                  </label>
+                  <div className="bg-muted border rounded-lg px-3 py-2 text-sm">
+                    {reportWindow
+                      ? formatWeeklyReportWindow(reportWindow)
+                      : "Next report available Monday"}
+                  </div>
+                </div>
 
-            <motion.button
-              onClick={handleGenerate}
-              disabled={!selectedCounty || isGenerating}
-              whileHover={{ scale: !selectedCounty || isGenerating ? 1 : 1.02 }}
-              whileTap={{ scale: !selectedCounty || isGenerating ? 1 : 0.98 }}
-              className="w-full bg-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed text-primary-foreground py-2 px-4 rounded-lg font-medium transition-colors"
-            >
-              {isGenerating ? "Generating..." : "Generate Report"}
-            </motion.button>
+                <button
+                  disabled={isGenerating || !sessionToken}
+                  onClick={handleValidate}
+                  className="w-full bg-primary text-primary-foreground py-2 rounded-lg disabled:opacity-50"
+                >
+                  {isGenerating ? "Validating..." : "Next: Validate Data"}
+                </button>
+              </>
+            )}
+
+            {/* STEP 2 */}
+            {step === 2 && (
+              <>
+                <p className="text-sm font-medium">
+                  Available variables:
+                </p>
+
+                <div className="space-y-2">
+                  {availableVars.map((v) => (
+                    <label
+                      key={v}
+                      className="flex items-center gap-2 text-sm"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedVars.includes(v)}
+                        onChange={() =>
+                          setSelectedVars((prev) =>
+                            prev.includes(v)
+                              ? prev.filter((x) => x !== v)
+                              : [...prev, v]
+                          )
+                        }
+                      />
+                      {v}
+                    </label>
+                  ))}
+                </div>
+
+                <button
+                  disabled={selectedVars.length === 0}
+                  onClick={handleNextToMaps}
+                  className="w-full bg-primary text-primary-foreground py-2 rounded-lg disabled:opacity-50"
+                >
+                  Next: Generate Maps
+                </button>
+              </>
+            )}
+
+            {/* STEP 3 */}
+            {step === 3 && (
+              <>
+                <p className="text-sm">Maps will be created for:</p>
+
+                <ul className="text-sm list-disc ml-4">
+                  {selectedVars.map((v) => (
+                    <li key={v}>{v}</li>
+                  ))}
+                </ul>
+
+                <button
+                  disabled={isGenerating}
+                  onClick={handleGenerateMaps}
+                  className="w-full bg-primary text-primary-foreground py-2 rounded-lg disabled:opacity-50"
+                >
+                  {isGenerating ? "Generating..." : "Next: Generate Tables"}
+                </button>
+              </>
+            )}
+
+            {/* STEP 4 */}
+            {step === 4 && (
+              <>
+                <p className="text-sm">All components ready</p>
+
+                <button
+                  disabled={isGenerating}
+                  onClick={handleGenerateReport}
+                  className="w-full bg-primary text-primary-foreground py-2 rounded-lg disabled:opacity-50"
+                >
+                  {isGenerating ? "Generating..." : "Generate Report"}
+                </button>
+              </>
+            )}
           </div>
-        </motion.div>
+        </div>
 
-        {/* Logs Section */}
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-          className="lg:col-span-2"
-        >
-          <div className="bg-card rounded-lg border border-border p-4 sm:p-6">
-            <h2 className="font-bold text-base sm:text-lg text-card-foreground mb-4">Processing Logs</h2>
+        {/* RIGHT PANEL — LOGS */}
+        <div className="lg:col-span-2">
+          <div className="bg-card rounded-lg border border-border p-6">
+            <h2 className="font-bold text-lg mb-4">
+              Processing Logs
+            </h2>
+
             <LogViewer logs={logs} />
+
+            {validationResult && step > 1 && (
+              <div className="mt-4 bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
+                <p className="text-xs text-blue-600 font-medium">Validation Summary</p>
+                <p className="text-sm mt-1">
+                  File: {validationResult.observation_file}<br />
+                  Variables: {validationResult.variables.join(", ")}<br />
+                  Rows: {validationResult.row_count}, Columns: {validationResult.column_count}
+                </p>
+              </div>
+            )}
 
             {errorMessage && (
               <div className="mt-4 bg-red-500/10 border border-red-500/30 rounded-lg p-4">
-                <p className="text-xs sm:text-sm text-red-600 font-medium">{errorMessage}</p>
+                <p className="text-sm text-red-600">
+                  {errorMessage}
+                </p>
               </div>
             )}
 
             {isComplete && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3 }}
-                className="mt-6 space-y-3"
-              >
+              <div className="mt-6 space-y-3">
                 <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-4">
-                  <p className="text-xs sm:text-sm text-green-600 font-medium">✓ Report generated successfully</p>
+                  <p className="text-sm text-green-600">
+                    ✓ Report generated successfully
+                  </p>
                 </div>
-                <div className="flex flex-col sm:flex-row gap-3">
-                  <motion.a
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
+
+                <div className="flex gap-3">
+                  <a
                     href={downloadUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground py-2 px-4 rounded-lg text-xs sm:text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                    className="flex-1 bg-primary text-primary-foreground py-2 px-4 rounded-lg text-sm flex items-center justify-center gap-2"
                   >
                     <Download className="w-4 h-4" />
                     Download PDF
-                  </motion.a>
-                  <motion.button
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    className="flex-1 bg-card hover:bg-muted border border-border text-card-foreground py-2 px-4 rounded-lg text-xs sm:text-sm font-medium transition-colors flex items-center justify-center gap-2"
-                    onClick={handleGenerate}
+                  </a>
+
+                  <button
+                    onClick={handleGenerateReport}
+                    className="flex-1 border border-border py-2 px-4 rounded-lg text-sm flex items-center justify-center gap-2"
                   >
                     <RefreshCw className="w-4 h-4" />
                     Regenerate
-                  </motion.button>
+                  </button>
                 </div>
-              </motion.div>
+              </div>
             )}
           </div>
-        </motion.div>
+        </div>
       </div>
     </motion.div>
   )

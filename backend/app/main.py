@@ -33,7 +33,7 @@ app.add_middleware(
 )
 
 # Include API routers
-from .api.v1 import health, auth, uploads, setting, report, dashboard
+from .api.v1 import health, auth, uploads, setting, report, dashboard, workflow
 
 app.include_router(health.router, prefix=f"{settings.API_V1_PREFIX}/health", tags=["health"])
 app.include_router(auth.router, prefix=f"{settings.API_V1_PREFIX}/auth", tags=["authentication"])
@@ -41,6 +41,7 @@ app.include_router(uploads.router, prefix=f"{settings.API_V1_PREFIX}/uploads", t
 app.include_router(setting.router, prefix=f"{settings.API_V1_PREFIX}/setting", tags=["setting"])
 app.include_router(report.router, prefix=f"{settings.API_V1_PREFIX}/reports", tags=["reports"])
 app.include_router(dashboard.router, prefix=f"{settings.API_V1_PREFIX}/dashboard", tags=["dashboard"])
+app.include_router(workflow.router, prefix=f"{settings.API_V1_PREFIX}/workflow", tags=["workflow"])
 
 @app.on_event("startup")
 async def startup_event():
