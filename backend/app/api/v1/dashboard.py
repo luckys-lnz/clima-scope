@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime
+from typing import Optional
+
 from app.api.v1.auth import get_current_user
-from app.core.supabase import get_db_client
+from app.core.supabase import get_supabase_anon
 from app.schemas.dashboard import DashboardOverviewResponse
 
 router = APIRouter(tags=["dashboard"])
@@ -9,94 +11,114 @@ router = APIRouter(tags=["dashboard"])
 
 @router.get("/overview", response_model=DashboardOverviewResponse)
 async def get_dashboard_overview(user=Depends(get_current_user)):
-    db = get_db_client()
+    supabase = get_supabase_anon()
 
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    user_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+    user_id = user.id if hasattr(user, "id") else user.get("id")
     if not user_id:
         raise HTTPException(status_code=400, detail="User ID not found")
 
     # --------------------------------------------------
     # USER COUNTY
     # --------------------------------------------------
-    profile = await db.select(
-        table="profiles",
-        filters={"id": f"eq.{user_id}"},
-        columns="county"
-    ) or []
-
-    county = profile[0]["county"] if profile else None
+    try:
+        profile_response = supabase.table("profiles")\
+            .select("county")\
+            .eq("id", user_id)\
+            .execute()
+        
+        county = profile_response.data[0]["county"] if profile_response.data else None
+    except Exception as e:
+        print(f"Error fetching user county: {e}")
+        county = None
 
     # --------------------------------------------------
     # USER REPORTS
     # --------------------------------------------------
-    user_reports = await db.select(
-        table="generated_reports",
-        filters={"user_id": f"eq.{user_id}"},
-        columns="generation_date"
-    ) or []
+    try:
+        user_reports_response = supabase.table("generated_reports")\
+            .select("generated_at")\
+            .eq("user_id", user_id)\
+            .execute()
+        
+        user_reports = user_reports_response.data or []
+        user_reports_generated = len(user_reports)
 
-    user_reports_generated = len(user_reports)
-
-    last_generation = max(
-        (r["generation_date"] for r in user_reports),
-        default=None
-    )
+        last_generation = None
+        if user_reports:
+            # Sort by generated_at descending
+            sorted_reports = sorted(
+                user_reports,
+                key=lambda x: x.get("generated_at", ""),
+                reverse=True
+            )
+            last_generation = sorted_reports[0].get("generated_at")
+    except Exception as e:
+        print(f"Error fetching user reports: {e}")
+        user_reports_generated = 0
+        last_generation = None
 
     # --------------------------------------------------
     # ALL REPORTS
     # --------------------------------------------------
-    all_reports = await db.select(
-        table="generated_reports",
-        columns="id"
-    ) or []
-
-    all_reports_done = len(all_reports)
+    try:
+        all_reports_response = supabase.table("generated_reports")\
+            .select("id", count="exact")\
+            .execute()
+        
+        all_reports_done = all_reports_response.count if hasattr(all_reports_response, 'count') else len(all_reports_response.data or [])
+    except Exception as e:
+        print(f"Error fetching all reports: {e}")
+        all_reports_done = 0
 
     # --------------------------------------------------
     # COUNTIES PROCESSED
     # --------------------------------------------------
-    all_profiles = await db.select(
-        table="profiles",
-        columns="county"
-    ) or []
-
-    counties_processed = len(set(p["county"] for p in all_profiles if p.get("county")))
+    try:
+        all_profiles_response = supabase.table("profiles")\
+            .select("county")\
+            .not_.is_("county", "null")\
+            .execute()
+        
+        counties_processed = len(set(p["county"] for p in all_profiles_response.data if p.get("county")))
+    except Exception as e:
+        print(f"Error fetching counties: {e}")
+        counties_processed = 0
 
     # --------------------------------------------------
     # WORKFLOW STEP (latest this week)
     # --------------------------------------------------
-    workflows = await db.select(
-        table="workflow_status",
-        filters={"user_id": f"eq.{user_id}"},
-        columns="uploaded,aggregated,mapped,generated,completed,updated_at"
-    ) or []
+    workflow_step: Optional[str] = None
+    
+    try:
+        workflows_response = supabase.table("workflow_status")\
+            .select("uploaded,aggregated,mapped,generated,completed,updated_at")\
+            .eq("user_id", user_id)\
+            .order("updated_at", desc=True)\
+            .limit(1)\
+            .execute()
+        
+        if workflows_response.data:
+            latest = workflows_response.data[0]
 
-    workflow_step = None
-    if workflows:
-        # Sort in Python by updated_at descending
-        workflows_sorted = sorted(
-            workflows,
-            key=lambda x: x.get("updated_at") or datetime.min,
-            reverse=True
-        )
-        latest = workflows_sorted[0]
-
-        # Determine step based on booleans
-        if latest.get("completed"):
-            workflow_step = "completed"
-        elif latest.get("generated"):
-            workflow_step = "generated"
-        elif latest.get("mapped"):
-            workflow_step = "mapped"
-        elif latest.get("aggregated"):
-            workflow_step = "aggregated"
-        elif latest.get("uploaded"):
-            workflow_step = "uploaded"
-        else:
-            workflow_step = "started"
+            # Determine step based on booleans
+            if latest.get("completed"):
+                workflow_step = "completed"
+            elif latest.get("generated"):
+                workflow_step = "generated"
+            elif latest.get("mapped"):
+                workflow_step = "mapped"
+            elif latest.get("aggregated"):
+                workflow_step = "aggregated"
+            elif latest.get("uploaded"):
+                workflow_step = "uploaded"
+            else:
+                workflow_step = "started"
+    except Exception as e:
+        print(f"Error fetching workflow: {e}")
+        workflow_step = None
 
     return DashboardOverviewResponse(
         stats={
