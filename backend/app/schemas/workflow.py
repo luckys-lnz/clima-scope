@@ -12,6 +12,16 @@ class ReportPeriod(BaseModel):
 
 
 # ============================================
+# Validation Request Schema
+# ============================================
+class ValidationRequest(BaseModel):
+    report_week: int
+    report_year: int
+    report_start_at: str
+    report_end_at: str
+
+
+# ============================================
 # Validation Response Schema
 # ============================================
 class ValidationResponse(BaseModel):

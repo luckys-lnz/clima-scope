@@ -35,6 +35,11 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
 
   const reportWindow = getCurrentWeeklyReportWindow()
 
+  // ===== HELPER: Format date to ISO string (YYYY-MM-DD) =====
+  const formatDateToISO = (date: Date): string => {
+    return date.toISOString().split('T')[0] // "2026-03-23"
+  }
+
   // ===== SESSION =====
   useEffect(() => {
     authService.getSession().then((session) => {
@@ -60,13 +65,26 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
       return
     }
 
-    addLog("Stage 1: Checking observation & shapefiles…")
+    if (!reportWindow) {
+      setErrorMessage("No active reporting period")
+      return
+    }
+
+    addLog(`Stage 1: Checking observation for Week ${reportWindow.week}, ${reportWindow.year}…`)
     setIsGenerating(true)
     setErrorMessage("")
 
     try {
-      // Call backend validation using workflow service
-      const result = await workflowService.validateInputs(sessionToken)
+      // ✅ Convert Date objects to ISO strings before sending
+      const result = await workflowService.validateInputs(
+        sessionToken,
+        {
+          report_week: reportWindow.week,
+          report_year: reportWindow.year,
+          report_start_at: formatDateToISO(reportWindow.start),  // Date → "2026-03-23"
+          report_end_at: formatDateToISO(reportWindow.end)       // Date → "2026-03-29"
+        }
+      )
       
       setValidationResult(result)
       setAvailableVars(result.variables)
@@ -75,6 +93,7 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
       addLog(`✓ Files found: ${result.observation_file}, ${result.shapefile}`)
       addLog(`✓ Variables detected: ${result.variables.join(", ")}`)
       addLog(`✓ Report period: Week ${result.report_week}, ${result.report_year}`)
+      addLog(`✓ Period dates: ${result.report_period.start} to ${result.report_period.end}`)
       addLog(`✓ File stats: ${result.row_count} rows, ${result.column_count} columns`)
       addLog("Stage 1 complete")
     } catch (e: any) {
@@ -111,7 +130,9 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
           county: userCounty,
           variables: selectedVars,
           report_week: reportWindow.week,
-          report_year: reportWindow.year
+          report_year: reportWindow.year,
+          report_start_at: formatDateToISO(reportWindow.start),
+          report_end_at: formatDateToISO(reportWindow.end)
         })
       })
 
@@ -153,6 +174,8 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
           county_name: userCounty,
           week_number: reportWindow.week,
           year: reportWindow.year,
+          report_start_at: formatDateToISO(reportWindow.start),
+          report_end_at: formatDateToISO(reportWindow.end),
           variables: selectedVars
         })
       })
@@ -328,6 +351,7 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
                 <p className="text-sm mt-1">
                   File: {validationResult.observation_file}<br />
                   Variables: {validationResult.variables.join(", ")}<br />
+                  Period: {validationResult.report_period.start} to {validationResult.report_period.end}<br />
                   Rows: {validationResult.row_count}, Columns: {validationResult.column_count}
                 </p>
               </div>

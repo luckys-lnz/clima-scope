@@ -1,29 +1,28 @@
 from fastapi import APIRouter, HTTPException, Depends
 import pandas as pd
-import tempfile
-import os
 import io
 import logging
 from datetime import datetime
-import json
 
 from app.core.supabase import get_supabase_anon
 from app.api.v1.auth import get_current_user
-from app.utils.report_date import get_current_weekly_report_window
-from app.schemas.workflow import ValidationResponse, ReportPeriod
+from app.schemas.workflow import ValidationRequest, ValidationResponse, ReportPeriod
 from app.core.config import settings
 
 router = APIRouter(tags=["Workflow"])
 logger = logging.getLogger(__name__)
 
 # Get bucket name from settings
-BUCKET_NAME = settings.SUPABASE_STORAGE_BUCKET  # This is "weather-reports"
+BUCKET_NAME = settings.SUPABASE_STORAGE_BUCKET
 
 
 @router.post("/validate-inputs", response_model=ValidationResponse)
-async def validate_inputs(user=Depends(get_current_user)):
+async def validate_inputs(
+    request: ValidationRequest,
+    user=Depends(get_current_user)
+):
     """
-    Step 1: Validate observation + shapefile for the CURRENT reporting period
+    Step 1: Validate observation + shapefile for the SPECIFIED reporting period
     """
     print("\n" + "="*60)
     print("🔍 WORKFLOW VALIDATION STARTED")
@@ -34,15 +33,8 @@ async def validate_inputs(user=Depends(get_current_user)):
     
     print(f"👤 User ID: {user_id}")
     print(f"🪣 Using bucket: {BUCKET_NAME}")
-    
-    # =========================
-    # Get current report window
-    # =========================
-    report_window = get_current_weekly_report_window()
-    
-    print(f"📅 Current date: {datetime.now()}")
-    print(f"📊 Report window: Week {report_window.week}, Year {report_window.year}")
-    print(f"📅 Period: {report_window.start} to {report_window.end}")
+    print(f"📊 Validating for week: {request.report_week}, year: {request.report_year}")
+    print(f"📅 Period: {request.report_start_at} to {request.report_end_at}")
     
     # =========================
     # DEBUG: Check ALL user uploads first
@@ -66,6 +58,8 @@ async def validate_inputs(user=Depends(get_current_user)):
                 print(f"     Type: {upload.get('file_type')}")
                 print(f"     Week: {upload.get('report_week')}")
                 print(f"     Year: {upload.get('report_year')}")
+                print(f"     Start: {upload.get('report_start_at')}")
+                print(f"     End: {upload.get('report_end_at')}")
                 print(f"     ID: {upload.get('id')}")
                 print(f"     Path: {upload.get('file_path')}")
                 print("     ---")
@@ -107,25 +101,25 @@ async def validate_inputs(user=Depends(get_current_user)):
         print(f"❌ Error fetching observation files: {e}")
     
     # =========================
-    # 1️⃣ FIND OBSERVATION FILE for CURRENT report week/year
+    # 1️⃣ FIND OBSERVATION FILE for SPECIFIED report week/year
     # =========================
     print("\n" + "-"*40)
-    print(f"🔍 LOOKING FOR WEEK {report_window.week} OBSERVATION FILE")
+    print(f"🔍 LOOKING FOR WEEK {request.report_week} OBSERVATION FILE")
     print("-"*40)
     
     print(f"🔍 Query filters:")
     print(f"   - user_id: {user_id}")
-    print(f"   - file_type: observations")
-    print(f"   - report_week: {report_window.week}")
-    print(f"   - report_year: {report_window.year}")
+    print(f"   - file_type: observations")  # ✅ FIXED: plural
+    print(f"   - report_week: {request.report_week}")
+    print(f"   - report_year: {request.report_year}")
     
     try:
         uploads_response = supabase.table("uploads")\
             .select("id,file_name,file_path,uploaded_at,report_week,report_year,report_start_at,report_end_at")\
             .eq("user_id", user_id)\
             .eq("file_type", "observations")\
-            .eq("report_week", report_window.week)\
-            .eq("report_year", report_window.year)\
+            .eq("report_week", request.report_week)\
+            .eq("report_year", request.report_year)\
             .order("uploaded_at", desc=True)\
             .limit(1)\
             .execute()
@@ -136,19 +130,7 @@ async def validate_inputs(user=Depends(get_current_user)):
         if uploads:
             print(f"✅ Found: {uploads[0].get('file_name')}")
         else:
-            print(f"❌ No file found for week {report_window.week}")
-            
-            # Try to find any file with week 9 to confirm existence
-            test_week9 = supabase.table("uploads")\
-                .select("file_name, report_week")\
-                .eq("user_id", user_id)\
-                .eq("file_type", "observations")\
-                .eq("report_week", 9)\
-                .execute()
-            
-            print(f"📊 Files with week=9: {len(test_week9.data)}")
-            if test_week9.data:
-                print(f"   Found: {test_week9.data[0].get('file_name')}")
+            print(f"❌ No file found for week {request.report_week}")
             
     except Exception as e:
         print(f"❌ Error in query: {e}")
@@ -158,7 +140,7 @@ async def validate_inputs(user=Depends(get_current_user)):
         print("\n❌ VALIDATION FAILED: No observation file found")
         raise HTTPException(
             status_code=404, 
-            detail=f"No observation file found for week {report_window.week}, {report_window.year}. Please upload the observation file for this reporting period."
+            detail=f"No observation file found for week {request.report_week}, {request.report_year}. Please upload the observation file for this reporting period."
         )
 
     obs = uploads[0]
@@ -199,7 +181,7 @@ async def validate_inputs(user=Depends(get_current_user)):
     shp = shapes[0]
 
     # =========================
-    # 3️⃣ DOWNLOAD OBSERVATION FILE - FIXED VERSION
+    # 3️⃣ DOWNLOAD OBSERVATION FILE
     # =========================
     print("\n" + "-"*40)
     print("⬇️ DOWNLOADING OBSERVATION FILE")
@@ -211,7 +193,6 @@ async def validate_inputs(user=Depends(get_current_user)):
         print(f"🪣 Using bucket: {BUCKET_NAME}")
         
         # Download file from storage using the configured bucket
-        # The file_path is the full path within the bucket
         file_data = supabase.storage.from_(BUCKET_NAME).download(file_path)
         print(f"✅ Download successful: {len(file_data)} bytes")
         
@@ -265,8 +246,8 @@ async def validate_inputs(user=Depends(get_current_user)):
         workflow_check = supabase.table("workflow_status")\
             .select("id")\
             .eq("user_id", user_id)\
-            .eq("report_week", report_window.week)\
-            .eq("report_year", report_window.year)\
+            .eq("report_week", request.report_week)\
+            .eq("report_year", request.report_year)\
             .execute()
         
         workflow_data = {
@@ -282,18 +263,19 @@ async def validate_inputs(user=Depends(get_current_user)):
             supabase.table("workflow_status")\
                 .update(workflow_data)\
                 .eq("user_id", user_id)\
-                .eq("report_week", report_window.week)\
-                .eq("report_year", report_window.year)\
+                .eq("report_week", request.report_week)\
+                .eq("report_year", request.report_year)\
                 .execute()
         else:
             print("➕ Creating new workflow record")
             workflow_data.update({
                 "user_id": user_id,
-                "report_week": report_window.week,
-                "report_year": report_window.year,
-                "report_start_at": report_window.start.isoformat(),
-                "report_end_at": report_window.end.isoformat(),
-                "uploaded": True
+                "report_week": request.report_week,
+                "report_year": request.report_year,
+                "report_start_at": request.report_start_at,
+                "report_end_at": request.report_end_at,
+                "uploaded": True,
+                "created_at": datetime.utcnow().isoformat()
             })
             supabase.table("workflow_status")\
                 .insert(workflow_data)\
@@ -319,11 +301,11 @@ async def validate_inputs(user=Depends(get_current_user)):
         variables=found,
         observation_file=obs["file_name"],
         shapefile=shp["file_name"],
-        report_week=report_window.week,
-        report_year=report_window.year,
+        report_week=request.report_week,
+        report_year=request.report_year,
         report_period=ReportPeriod(
-            start=report_window.start.isoformat(),
-            end=report_window.end.isoformat()
+            start=request.report_start_at,
+            end=request.report_end_at
         ),
         column_count=len(df.columns),
         row_count=len(df)
