@@ -17,24 +17,34 @@ export const workflowService = {
    * Step 1: Validate inputs for current reporting period
    * Checks if observation file exists for current week and validates shapefile
    */
-  validateInputs: async (token: string): Promise<ValidationResponse> => {
+  validateInputs: async (
+    token: string, 
+    data: { 
+      report_week: number; 
+      report_year: number; 
+      report_start_at: string; 
+      report_end_at: string;
+    }
+  ): Promise<ValidationResponse> => {
     const response = await fetch(`${API_BASE}/api/v1/workflow/validate-inputs`, {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${token}`,
         "Content-Type": "application/json"
-      }
+      },
+      // ✅ FIXED: Send the data in the request body
+      body: JSON.stringify(data)
     })
 
-    const data = await response.json()
+    const responseData = await response.json()
     
     if (!response.ok) {
       // Type assertion for error response
-      const error = data as ValidationError
+      const error = responseData as ValidationError
       throw new Error(error.detail || "Validation failed")
     }
 
-    return data as ValidationResponse
+    return responseData as ValidationResponse
   },
 
   /**
