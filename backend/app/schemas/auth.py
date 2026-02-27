@@ -39,7 +39,6 @@ class AuthResponse(BaseModel):
     access_token: str
     refresh_token: str
     user: UserResponse
-    expires_in: int = 3600
 
 class ProfileUpdateRequest(BaseModel):
     full_name: Optional[str] = None
