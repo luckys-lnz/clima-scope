@@ -4,7 +4,10 @@ import type {
   ValidationResponse, 
   ValidationError,
   WorkflowStatus,
-  ReportPeriod 
+  ReportPeriod,
+  MapGenerationRequest,
+  MapGenerationResponse,
+  GeneratedMap
 } from "@/lib/models/workflow"
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
@@ -32,14 +35,12 @@ export const workflowService = {
         "Authorization": `Bearer ${token}`,
         "Content-Type": "application/json"
       },
-      // ✅ FIXED: Send the data in the request body
       body: JSON.stringify(data)
     })
 
     const responseData = await response.json()
     
     if (!response.ok) {
-      // Type assertion for error response
       const error = responseData as ValidationError
       throw new Error(error.detail || "Validation failed")
     }
@@ -48,10 +49,104 @@ export const workflowService = {
   },
 
   /**
-   * Get current workflow status for the user
+   * Step 3: Generate maps for selected variables
+   * Creates maps for each variable and returns URLs
    */
-  getWorkflowStatus: async (token: string): Promise<WorkflowStatus | null> => {
-    const response = await fetch(`${API_BASE}/api/v1/workflow/status`, {
+  generateMaps: async (
+    token: string,
+    data: MapGenerationRequest
+  ): Promise<MapGenerationResponse> => {
+    const response = await fetch(`${API_BASE}/api/v1/workflow/generate-maps`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(data)
+    })
+
+    const responseData = await response.json()
+    
+    if (!response.ok) {
+      const error = responseData as ValidationError
+      throw new Error(error.detail || "Map generation failed")
+    }
+
+    return responseData as MapGenerationResponse
+  },
+
+  /**
+   * Get all generated maps for a specific week
+   * Returns list of maps created for this reporting period
+   */
+  getGeneratedMaps: async (
+    token: string,
+    reportWeek: number,
+    reportYear: number
+  ): Promise<GeneratedMap[]> => {
+    const response = await fetch(
+      `${API_BASE}/api/v1/workflow/maps?week=${reportWeek}&year=${reportYear}`,
+      {
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
+      }
+    )
+
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.detail || "Failed to fetch maps")
+    }
+
+    return response.json()
+  },
+
+  /**
+   * Get a specific map by variable and week
+   * Useful for checking if a map already exists
+   */
+  getMapByVariable: async (
+    token: string,
+    variable: string,
+    reportWeek: number,
+    reportYear: number
+  ): Promise<GeneratedMap | null> => {
+    const response = await fetch(
+      `${API_BASE}/api/v1/workflow/maps/${variable}?week=${reportWeek}&year=${reportYear}`,
+      {
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
+      }
+    )
+
+    if (response.status === 404) {
+      return null
+    }
+
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.detail || "Failed to fetch map")
+    }
+
+    return response.json()
+  },
+
+  /**
+   * Get current workflow status for the user and specific week
+   */
+  getWorkflowStatus: async (
+    token: string,
+    reportWeek?: number,
+    reportYear?: number
+  ): Promise<WorkflowStatus | null> => {
+    let url = `${API_BASE}/api/v1/workflow/status`
+    
+    if (reportWeek && reportYear) {
+      url += `?week=${reportWeek}&year=${reportYear}`
+    }
+    
+    const response = await fetch(url, {
       headers: {
         "Authorization": `Bearer ${token}`
       }
@@ -63,6 +158,35 @@ export const workflowService = {
       }
       const error = await response.json()
       throw new Error(error.detail || "Failed to fetch workflow status")
+    }
+
+    return response.json()
+  },
+
+  /**
+   * Update workflow status (mark steps as complete)
+   */
+  updateWorkflowStatus: async (
+    token: string,
+    reportWeek: number,
+    reportYear: number,
+    updates: Partial<WorkflowStatus>
+  ): Promise<WorkflowStatus> => {
+    const response = await fetch(
+      `${API_BASE}/api/v1/workflow/status?week=${reportWeek}&year=${reportYear}`,
+      {
+        method: "PATCH",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(updates)
+      }
+    )
+
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.detail || "Failed to update workflow status")
     }
 
     return response.json()
@@ -88,5 +212,43 @@ export const workflowService = {
     }
 
     return response.json()
+  },
+
+  /**
+   * Step 4: Generate final PDF report
+   */
+  generateReport: async (
+    token: string,
+    data: {
+      county_name: string
+      week_number: number
+      year: number
+      report_start_at: string
+      report_end_at: string
+      variables: string[]
+    }
+  ): Promise<{
+    pdf_url: string
+    filename: string
+    report_week: number
+    report_year: number
+  }> => {
+    const response = await fetch(`${API_BASE}/api/v1/workflow/generate-report`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(data)
+    })
+
+    const responseData = await response.json()
+    
+    if (!response.ok) {
+      const error = responseData as ValidationError
+      throw new Error(error.detail || "Report generation failed")
+    }
+
+    return responseData
   }
 }

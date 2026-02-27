@@ -1,8 +1,14 @@
+// ============================================
+// Report Period Schema
+// ============================================
 export interface ReportPeriod {
     start: string
     end: string
 }
-  
+
+// ============================================
+// Validation Schemas
+// ============================================
 export interface ValidationResponse {
     observation_found: boolean
     shapefile_found: boolean
@@ -15,13 +21,55 @@ export interface ValidationResponse {
     column_count: number
     row_count: number
 }
-  
+
 export interface ValidationError {
     detail: string
 }
-  
+
+// ============================================
+// MAP GENERATION SCHEMAS
+// ============================================
+export interface MapGenerationRequest {
+    county: string
+    variables: string[]
+    report_week: number
+    report_year: number
+    report_start_at: string
+    report_end_at: string
+}
+
+export interface MapOutput {
+    variable: string
+    map_url: string
+    thumbnail_url?: string
+}
+
+export interface MapGenerationResponse {
+    outputs: MapOutput[]
+    workflow_status_id?: number
+}
+
+// ============================================
+// Generated Map Record
+// ============================================
+export interface GeneratedMap {
+    id?: string
+    user_id: string
+    workflow_status_id: number
+    variable: string
+    map_url: string
+    storage_path: string
+    report_week: number
+    report_year: number
+    file_size?: number
+    created_at?: string
+}
+
+// ============================================
+// Workflow Status Schema
+// ============================================
 export interface WorkflowStatus {
-    id: string
+    id: number  // Changed from string to number to match DB
     user_id: string
     report_week: number
     report_year: number

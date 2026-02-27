@@ -12,11 +12,20 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 export interface LoginResponse {
   user: User
   access_token: string
+  refresh_token: string  // ← ADD THIS
+  expires_in: number
+}
+
+export interface RefreshResponse {
+  access_token: string
+  refresh_token: string  // ← ADD THIS
+  expires_in: number
 }
 
 export interface Session {
   user: User
   access_token: string
+  refresh_token: string  // ← ADD THIS
 }
 
 export const authService = {
@@ -35,9 +44,32 @@ export const authService = {
       throw new Error(result.detail || "Login failed")
     }
 
-    // Store in localStorage
+    // Store BOTH tokens in localStorage
     localStorage.setItem("access_token", result.access_token)
+    localStorage.setItem("refresh_token", result.refresh_token)  // ← ADD THIS
     localStorage.setItem("user", JSON.stringify(result.user))
+
+    return result
+  },
+
+  // -----------------------
+  // REFRESH TOKEN - NEW METHOD!
+  // -----------------------
+  refreshToken: async (refresh_token: string): Promise<RefreshResponse> => {
+    const response = await fetch(`${API_BASE}/api/v1/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token }),
+    })
+
+    const result = await response.json()
+    if (!response.ok) {
+      throw new Error(result.detail || "Token refresh failed")
+    }
+
+    // Update stored tokens
+    localStorage.setItem("access_token", result.access_token)
+    localStorage.setItem("refresh_token", result.refresh_token)
 
     return result
   },
@@ -77,7 +109,9 @@ export const authService = {
       throw new Error(error.detail || "Logout failed")
     }
 
+    // Clear ALL tokens
     localStorage.removeItem("access_token")
+    localStorage.removeItem("refresh_token")  // ← ADD THIS
     localStorage.removeItem("user")
   },
 
@@ -102,10 +136,11 @@ export const authService = {
   // GET SESSION FROM LOCALSTORAGE
   // -----------------------
   getSession: async (): Promise<Session | null> => {
-    const token = localStorage.getItem("access_token")
+    const access_token = localStorage.getItem("access_token")
+    const refresh_token = localStorage.getItem("refresh_token")  // ← ADD THIS
     const userStr = localStorage.getItem("user")
     
-    if (!token || !userStr) {
+    if (!access_token || !refresh_token || !userStr) {  // ← UPDATE CONDITION
       return null
     }
 
@@ -113,10 +148,23 @@ export const authService = {
       const user = JSON.parse(userStr) as User
       return {
         user,
-        access_token: token
+        access_token,
+        refresh_token  // ← ADD THIS
       }
     } catch {
       return null
+    }
+  },
+
+  // -----------------------
+  // CHECK IF TOKEN IS EXPIRED (utility)
+  // -----------------------
+  isTokenExpired: (token: string): boolean => {
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]))
+      return payload.exp * 1000 < Date.now()
+    } catch {
+      return true
     }
   }
 }

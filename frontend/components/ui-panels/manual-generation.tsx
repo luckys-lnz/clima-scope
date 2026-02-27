@@ -10,7 +10,7 @@ import {
 } from "@/lib/utils/report_date"
 import { authService } from "@/lib/services/authService"
 import { workflowService } from "@/lib/services/workflowService"
-import type { ValidationResponse } from "@/lib/models/workflow"
+import type { ValidationResponse, MapOutput } from "@/lib/models/workflow"
 
 interface ManualGenerationProps {
   onBack: () => void
@@ -26,6 +26,7 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
   const [selectedVars, setSelectedVars] = useState<string[]>([])
   const [logs, setLogs] = useState<string[]>([])
   const [validationResult, setValidationResult] = useState<ValidationResponse | null>(null)
+  const [generatedMaps, setGeneratedMaps] = useState<MapOutput[]>([])
 
   const [isGenerating, setIsGenerating] = useState(false)
   const [isComplete, setIsComplete] = useState(false)
@@ -75,14 +76,13 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
     setErrorMessage("")
 
     try {
-      // ✅ Convert Date objects to ISO strings before sending
       const result = await workflowService.validateInputs(
         sessionToken,
         {
           report_week: reportWindow.week,
           report_year: reportWindow.year,
-          report_start_at: formatDateToISO(reportWindow.start),  // Date → "2026-03-23"
-          report_end_at: formatDateToISO(reportWindow.end)       // Date → "2026-03-29"
+          report_start_at: formatDateToISO(reportWindow.start),
+          report_end_at: formatDateToISO(reportWindow.end)
         }
       )
       
@@ -111,94 +111,86 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
     setStep(3)
   }
 
-  // ===== STEP 3: MAP GENERATION =====
+  // ===== STEP 3: MAP GENERATION (USING WORKFLOW SERVICE) =====
   const handleGenerateMaps = async () => {
-    if (!sessionToken) return
+    if (!sessionToken || !reportWindow) return
 
     addLog("Stage 3: Generating maps…")
     setIsGenerating(true)
+    setErrorMessage("")
 
     try {
-      // This would be your next endpoint
-      const res = await fetch("/api/v1/workflow/generate-maps", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${sessionToken}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          county: userCounty,
-          variables: selectedVars,
-          report_week: reportWindow.week,
-          report_year: reportWindow.year,
-          report_start_at: formatDateToISO(reportWindow.start),
-          report_end_at: formatDateToISO(reportWindow.end)
-        })
+      const result = await workflowService.generateMaps(sessionToken, {
+        county: userCounty,
+        variables: selectedVars,
+        report_week: reportWindow.week,
+        report_year: reportWindow.year,
+        report_start_at: formatDateToISO(reportWindow.start),
+        report_end_at: formatDateToISO(reportWindow.end)
       })
 
-      const data = await res.json()
-      
-      if (!res.ok) {
-        throw new Error(data.detail || "Map generation failed")
-      }
+      setGeneratedMaps(result.outputs)
 
-      data.outputs?.forEach((o: any) =>
-        addLog(`✓ Map ready: ${o.variable}`)
+      result.outputs.forEach((map: MapOutput) =>
+        addLog(`✓ Map ready: ${map.variable}`)
       )
 
       setStep(4)
       addLog("Stage 3 complete")
     } catch (e: any) {
-      addLog(`✗ Map generation failed: ${e.message}`)
-      setErrorMessage(e.message)
+      const errorMsg = e.message || "Map generation failed"
+      addLog(`✗ Map generation failed: ${errorMsg}`)
+      setErrorMessage(errorMsg)
     } finally {
       setIsGenerating(false)
     }
   }
 
-  // ===== STEP 4: REPORT =====
+  // ===== STEP 4: REPORT GENERATION (USING WORKFLOW SERVICE) =====
   const handleGenerateReport = async () => {
     if (!reportWindow || !sessionToken) return
 
     addLog("Stage 4: Generating final report…")
     setIsGenerating(true)
+    setErrorMessage("")
 
     try {
-      const res = await fetch("/api/v1/workflow/generate-report", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${sessionToken}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          county_name: userCounty,
-          week_number: reportWindow.week,
-          year: reportWindow.year,
-          report_start_at: formatDateToISO(reportWindow.start),
-          report_end_at: formatDateToISO(reportWindow.end),
-          variables: selectedVars
-        })
+      const result = await workflowService.generateReport(sessionToken, {
+        county_name: userCounty,
+        week_number: reportWindow.week,
+        year: reportWindow.year,
+        report_start_at: formatDateToISO(reportWindow.start),
+        report_end_at: formatDateToISO(reportWindow.end),
+        variables: selectedVars
       })
 
-      const data = await res.json()
-      
-      if (!res.ok) {
-        throw new Error(data.detail || "Report generation failed")
-      }
-
       const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-      setDownloadUrl(`${baseUrl}${data.pdf_url}`)
+      setDownloadUrl(`${baseUrl}${result.pdf_url}`)
 
-      addLog(`✓ Report generated: ${data.filename}`)
+      addLog(`✓ Report generated: ${result.filename}`)
       addLog("Workflow complete")
 
       setIsComplete(true)
     } catch (e: any) {
-      addLog(`✗ Report generation failed: ${e.message}`)
-      setErrorMessage(e.message)
+      const errorMsg = e.message || "Report generation failed"
+      addLog(`✗ Report generation failed: ${errorMsg}`)
+      setErrorMessage(errorMsg)
     } finally {
       setIsGenerating(false)
     }
+  }
+
+  // ===== RESET WORKFLOW =====
+  const handleReset = () => {
+    setStep(1)
+    setSelectedVars([])
+    setLogs([])
+    setValidationResult(null)
+    setGeneratedMaps([])
+    setIsComplete(false)
+    setDownloadUrl("")
+    setErrorMessage("")
+    addLog("Workflow reset")
   }
 
   // ===== UI =====
@@ -208,15 +200,26 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
       animate={{ opacity: 1 }}
       className="p-4 sm:p-6 space-y-6 lg:pt-0"
     >
-      {/* BACK */}
-      <motion.button
-        onClick={onBack}
-        whileHover={{ x: -4 }}
-        className="flex items-center gap-2 text-primary"
-      >
-        <ChevronLeft className="w-4 h-4" />
-        <span className="text-sm">Back to Dashboard</span>
-      </motion.button>
+      {/* BACK BUTTON */}
+      <div className="flex items-center justify-between">
+        <motion.button
+          onClick={onBack}
+          whileHover={{ x: -4 }}
+          className="flex items-center gap-2 text-primary"
+        >
+          <ChevronLeft className="w-4 h-4" />
+          <span className="text-sm">Back to Dashboard</span>
+        </motion.button>
+
+        {step > 1 && !isComplete && (
+          <button
+            onClick={handleReset}
+            className="text-sm text-muted-foreground hover:text-primary"
+          >
+            Reset Workflow
+          </button>
+        )}
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* LEFT PANEL — STEPPER */}
@@ -228,7 +231,7 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
               Step {step}/{totalSteps}
             </div>
 
-            {/* STEP 1 */}
+            {/* STEP 1: VALIDATE */}
             {step === 1 && (
               <>
                 <div>
@@ -239,9 +242,7 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
                 </div>
 
                 <div>
-                  <label className="text-xs font-medium">
-                    Reporting Period
-                  </label>
+                  <label className="text-xs font-medium">Reporting Period</label>
                   <div className="bg-muted border rounded-lg px-3 py-2 text-sm">
                     {reportWindow
                       ? formatWeeklyReportWindow(reportWindow)
@@ -259,18 +260,16 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
               </>
             )}
 
-            {/* STEP 2 */}
+            {/* STEP 2: SELECT VARIABLES */}
             {step === 2 && (
               <>
-                <p className="text-sm font-medium">
-                  Available variables:
-                </p>
+                <p className="text-sm font-medium">Available variables:</p>
 
-                <div className="space-y-2">
+                <div className="space-y-2 max-h-48 overflow-y-auto">
                   {availableVars.map((v) => (
                     <label
                       key={v}
-                      className="flex items-center gap-2 text-sm"
+                      className="flex items-center gap-2 text-sm cursor-pointer hover:bg-muted p-1 rounded"
                     >
                       <input
                         type="checkbox"
@@ -282,8 +281,9 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
                               : [...prev, v]
                           )
                         }
+                        className="cursor-pointer"
                       />
-                      {v}
+                      <span className="capitalize">{v}</span>
                     </label>
                   ))}
                 </div>
@@ -293,92 +293,149 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
                   onClick={handleNextToMaps}
                   className="w-full bg-primary text-primary-foreground py-2 rounded-lg disabled:opacity-50"
                 >
-                  Next: Generate Maps
+                  Next: Generate Maps ({selectedVars.length} selected)
                 </button>
               </>
             )}
 
-            {/* STEP 3 */}
+            {/* STEP 3: GENERATE MAPS */}
             {step === 3 && (
               <>
-                <p className="text-sm">Maps will be created for:</p>
+                <p className="text-sm font-medium">Maps to generate:</p>
 
-                <ul className="text-sm list-disc ml-4">
+                <ul className="text-sm list-disc ml-4 space-y-1">
                   {selectedVars.map((v) => (
-                    <li key={v}>{v}</li>
+                    <li key={v} className="capitalize">{v}</li>
                   ))}
                 </ul>
 
                 <button
                   disabled={isGenerating}
                   onClick={handleGenerateMaps}
-                  className="w-full bg-primary text-primary-foreground py-2 rounded-lg disabled:opacity-50"
+                  className="w-full bg-primary text-primary-foreground py-2 rounded-lg disabled:opacity-50 flex items-center justify-center gap-2"
                 >
-                  {isGenerating ? "Generating..." : "Next: Generate Tables"}
+                  {isGenerating ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      Generating...
+                    </>
+                  ) : (
+                    "Generate Maps"
+                  )}
                 </button>
               </>
             )}
 
-            {/* STEP 4 */}
-            {step === 4 && (
+            {/* STEP 4: GENERATE REPORT */}
+            {step === 4 && !isComplete && (
               <>
-                <p className="text-sm">All components ready</p>
+                <p className="text-sm font-medium">Generated Maps:</p>
+
+                <ul className="text-sm list-disc ml-4 space-y-1">
+                  {generatedMaps.map((map) => (
+                    <li key={map.variable} className="capitalize flex items-center gap-2">
+                      <span>{map.variable}</span>
+                      <a 
+                        href={map.map_url} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="text-xs text-primary hover:underline"
+                      >
+                        (view)
+                      </a>
+                    </li>
+                  ))}
+                </ul>
 
                 <button
                   disabled={isGenerating}
                   onClick={handleGenerateReport}
                   className="w-full bg-primary text-primary-foreground py-2 rounded-lg disabled:opacity-50"
                 >
-                  {isGenerating ? "Generating..." : "Generate Report"}
+                  {isGenerating ? "Generating Report..." : "Generate Report"}
+                </button>
+              </>
+            )}
+
+            {/* COMPLETED */}
+            {isComplete && (
+              <>
+                <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-3 text-center">
+                  <p className="text-sm text-green-600 font-medium">✓ Workflow Complete</p>
+                </div>
+
+                <button
+                  onClick={handleReset}
+                  className="w-full border border-border py-2 rounded-lg text-sm hover:bg-muted transition-colors"
+                >
+                  Start New Report
                 </button>
               </>
             )}
           </div>
         </div>
 
-        {/* RIGHT PANEL — LOGS */}
+        {/* RIGHT PANEL — LOGS AND PREVIEW */}
         <div className="lg:col-span-2">
           <div className="bg-card rounded-lg border border-border p-6">
-            <h2 className="font-bold text-lg mb-4">
-              Processing Logs
-            </h2>
+            <h2 className="font-bold text-lg mb-4">Processing Logs</h2>
 
             <LogViewer logs={logs} />
 
+            {/* Validation Summary */}
             {validationResult && step > 1 && (
               <div className="mt-4 bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
-                <p className="text-xs text-blue-600 font-medium">Validation Summary</p>
-                <p className="text-sm mt-1">
-                  File: {validationResult.observation_file}<br />
-                  Variables: {validationResult.variables.join(", ")}<br />
-                  Period: {validationResult.report_period.start} to {validationResult.report_period.end}<br />
-                  Rows: {validationResult.row_count}, Columns: {validationResult.column_count}
+                <p className="text-xs text-blue-600 font-medium mb-1">Validation Summary</p>
+                <p className="text-sm">
+                  <span className="font-medium">File:</span> {validationResult.observation_file}<br />
+                  <span className="font-medium">Variables:</span> {validationResult.variables.join(", ")}<br />
+                  <span className="font-medium">Period:</span> {validationResult.report_period.start} to {validationResult.report_period.end}<br />
+                  <span className="font-medium">Rows:</span> {validationResult.row_count}, <span className="font-medium">Columns:</span> {validationResult.column_count}
                 </p>
               </div>
             )}
 
+            {/* Generated Maps Preview */}
+            {generatedMaps.length > 0 && (
+              <div className="mt-4">
+                <p className="text-sm font-medium mb-2">Generated Maps:</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {generatedMaps.map((map) => (
+                    <a
+                      key={map.variable}
+                      href={map.map_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="border border-border rounded-lg p-2 hover:bg-muted transition-colors"
+                    >
+                      <p className="text-xs text-center capitalize">{map.variable}</p>
+                      <p className="text-[10px] text-muted-foreground text-center mt-1">Click to view</p>
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Error Message */}
             {errorMessage && (
               <div className="mt-4 bg-red-500/10 border border-red-500/30 rounded-lg p-4">
-                <p className="text-sm text-red-600">
-                  {errorMessage}
-                </p>
+                <p className="text-sm text-red-600">{errorMessage}</p>
               </div>
             )}
 
-            {isComplete && (
+            {/* Download Section */}
+            {isComplete && downloadUrl && (
               <div className="mt-6 space-y-3">
                 <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-4">
-                  <p className="text-sm text-green-600">
-                    ✓ Report generated successfully
-                  </p>
+                  <p className="text-sm text-green-600 font-medium">✓ Report generated successfully</p>
                 </div>
 
                 <div className="flex gap-3">
                   <a
                     href={downloadUrl}
                     target="_blank"
-                    rel="noreferrer"
-                    className="flex-1 bg-primary text-primary-foreground py-2 px-4 rounded-lg text-sm flex items-center justify-center gap-2"
+                    rel="noopener noreferrer"
+                    className="flex-1 bg-primary text-primary-foreground py-2 px-4 rounded-lg text-sm flex items-center justify-center gap-2 hover:bg-primary/90 transition-colors"
                   >
                     <Download className="w-4 h-4" />
                     Download PDF
@@ -386,7 +443,7 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
 
                   <button
                     onClick={handleGenerateReport}
-                    className="flex-1 border border-border py-2 px-4 rounded-lg text-sm flex items-center justify-center gap-2"
+                    className="flex-1 border border-border py-2 px-4 rounded-lg text-sm flex items-center justify-center gap-2 hover:bg-muted transition-colors"
                   >
                     <RefreshCw className="w-4 h-4" />
                     Regenerate

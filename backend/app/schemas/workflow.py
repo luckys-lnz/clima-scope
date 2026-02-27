@@ -38,10 +38,57 @@ class ValidationResponse(BaseModel):
 
 
 # ============================================
-# Workflow Status Schema
+# MAP GENERATION SCHEMAS
+# ============================================
+
+class MapGenerationRequest(BaseModel):
+    """Request to generate maps for selected variables"""
+    county: str
+    variables: List[str]
+    report_week: int
+    report_year: int
+    report_start_at: str
+    report_end_at: str
+
+
+class MapOutput(BaseModel):
+    """Single map output"""
+    variable: str
+    map_url: str
+    thumbnail_url: Optional[str] = None
+
+
+class MapGenerationResponse(BaseModel):
+    """Response after generating maps"""
+    outputs: List[MapOutput]
+    workflow_status_id: Optional[int] = None
+
+
+# ============================================
+# Generated Maps Schema (for database records)
+# ============================================
+class GeneratedMap(BaseModel):
+    """Record of a generated map in the database"""
+    id: Optional[str] = None
+    user_id: str
+    workflow_status_id: int
+    variable: str
+    map_url: str
+    storage_path: str
+    report_week: int
+    report_year: int
+    file_size: Optional[int] = None
+    created_at: Optional[datetime] = None
+    
+    class Config:
+        from_attributes = True
+
+
+# ============================================
+# Workflow Status Schema (UPDATED)
 # ============================================
 class WorkflowStatus(BaseModel):
-    id: str
+    id: int  # Changed from str to int to match database
     user_id: str
     report_week: int
     report_year: int
