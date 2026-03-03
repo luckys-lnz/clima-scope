@@ -3,15 +3,23 @@ import pandas as pd
 import io
 import logging
 import os
+import tempfile
 from datetime import datetime
 from typing import List
 from pydantic import BaseModel
 
 from app.core.supabase import get_supabase_anon, get_supabase_admin
 from app.api.v1.auth import get_current_user
-from app.schemas.workflow import ValidationRequest, ValidationResponse, ReportPeriod
+from app.schemas.workflow import (
+    ValidationRequest,
+    ValidationResponse,
+    ReportPeriod,
+    ReportGenerationRequest,
+    ReportGenerationResponse,
+)
 from app.core.config import settings
 from app.utils.map_generator import create_weather_map
+from app.utils.report_generator import generate_weekly_forecast_pdf
 
 router = APIRouter(tags=["Workflow"])
 logger = logging.getLogger(__name__)
@@ -28,9 +36,11 @@ class MapGenerationRequest(BaseModel):
     report_start_at: str
     report_end_at: str
 
+
 class MapOutput(BaseModel):
     variable: str
     map_url: str
+
 
 class MapGenerationResponse(BaseModel):
     outputs: List[MapOutput]
@@ -341,75 +351,79 @@ async def validate_inputs(
 @router.post("/generate-maps", response_model=MapGenerationResponse)
 async def generate_maps(
     request: MapGenerationRequest,
-    user=Depends(get_current_user)
+    user=Depends(get_current_user),
 ):
     """
     Step 3: Generate maps for each selected variable
     """
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("🗺️ MAP GENERATION STARTED")
-    print("="*60)
-    
+    print("=" * 60)
+
     supabase = get_supabase_anon()
     supabase_admin = get_supabase_admin()
     user_id = user.id if hasattr(user, "id") else user.get("id")
-    
+
     print(f"👤 User ID: {user_id}")
     print(f"📍 County: {request.county}")
     print(f"📊 Variables: {request.variables}")
     print(f"📅 Week: {request.report_week}, Year: {request.report_year}")
     print(f"📅 Period: {request.report_start_at} to {request.report_end_at}")
-    
+
     # =========================
     # 1. GET OBSERVATION FILE
     # =========================
     try:
-        upload = supabase.table("uploads")\
-            .select("id, file_name, file_path")\
-            .eq("user_id", user_id)\
-            .eq("file_type", "observations")\
-            .eq("report_week", request.report_week)\
-            .eq("report_year", request.report_year)\
-            .order("uploaded_at", desc=True)\
-            .limit(1)\
+        upload = (
+            supabase.table("uploads")
+            .select("id, file_name, file_path")
+            .eq("user_id", user_id)
+            .eq("file_type", "observations")
+            .eq("report_week", request.report_week)
+            .eq("report_year", request.report_year)
+            .order("uploaded_at", desc=True)
+            .limit(1)
             .execute()
-        
+        )
+
         if not upload.data:
             raise HTTPException(
-                status_code=404, 
-                detail=f"No observation file found for week {request.report_week}"
+                status_code=404,
+                detail=f"No observation file found for week {request.report_week}",
             )
-        
+
         obs = upload.data[0]
         print(f"✅ Observation file: {obs['file_name']}")
-        
+
     except Exception as e:
         print(f"❌ Error fetching observation file: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch observation file")
-    
+
     # =========================
     # 2. GET ALL SHAPEFILE COMPONENTS FROM shared_files
     # =========================
     try:
-        shapefile_records = supabase.table("shared_files")\
-            .select("file_name, file_path")\
-            .eq("file_type", "shapefile")\
+        shapefile_records = (
+            supabase.table("shared_files")
+            .select("file_name, file_path")
+            .eq("file_type", "shapefile")
             .execute()
-        
+        )
+
         if not shapefile_records.data:
             raise HTTPException(
-                status_code=404, 
-                detail="No shapefile found. Please contact administrator."
+                status_code=404,
+                detail="No shapefile found. Please contact administrator.",
             )
-        
+
         print(f"\n📁 Found {len(shapefile_records.data)} shapefile components:")
         for comp in shapefile_records.data:
             print(f"   - {comp['file_name']}")
-        
+
     except Exception as e:
         print(f"❌ Error fetching shapefiles: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch shapefiles")
-    
+
     # =========================
     # 3. DOWNLOAD OBSERVATION FILE
     # =========================
@@ -417,144 +431,157 @@ async def generate_maps(
     try:
         file_data = supabase.storage.from_(BUCKET_NAME).download(obs["file_path"])
         print(f"\n✅ Downloaded observation: {len(file_data)} bytes")
-        
+
         temp_csv = f"/tmp/weather_data_{user_id}_{request.report_week}.csv"
-        with open(temp_csv, 'wb') as f:
+        with open(temp_csv, "wb") as f:
             f.write(file_data)
         print(f"✅ Saved temp file: {temp_csv}")
-        
+
     except Exception as e:
         print(f"❌ Error downloading observation file: {e}")
         raise HTTPException(status_code=500, detail="Failed to download observation file")
-    
+
     # =========================
     # 4. DOWNLOAD ALL SHAPEFILE COMPONENTS
     # =========================
     temp_shapefile_dir = None
     local_shapefile_path = None
-    
+
     try:
-        import os
-        import tempfile
-        
         # Create temp directory for all shapefile components
-        temp_shapefile_dir = tempfile.mkdtemp(prefix=f"shapefiles_{user_id}_{request.report_week}_")
+        temp_shapefile_dir = tempfile.mkdtemp(
+            prefix=f"shapefiles_{user_id}_{request.report_week}_"
+        )
         print(f"\n✅ Created temp directory: {temp_shapefile_dir}")
-        
+
         # Download each shapefile component
         for component in shapefile_records.data:
             try:
-                file_data = supabase.storage.from_(BUCKET_NAME).download(component["file_path"])
-                
+                file_data = supabase.storage.from_(BUCKET_NAME).download(
+                    component["file_path"]
+                )
+
                 # Save to temp directory with original filename
                 local_path = os.path.join(temp_shapefile_dir, component["file_name"])
-                with open(local_path, 'wb') as f:
+                with open(local_path, "wb") as f:
                     f.write(file_data)
-                
+
                 print(f"✅ Downloaded: {component['file_name']}")
-                
+
                 # Store path to .shp file for map generation
-                if component["file_name"].endswith('.shp'):
+                if component["file_name"].endswith(".shp"):
                     local_shapefile_path = local_path
-                    
+
             except Exception as e:
                 print(f"⚠️ Failed to download {component['file_name']}: {e}")
                 continue
-        
+
         if not local_shapefile_path:
             raise Exception("No .shp file found in downloaded components")
-        
+
         print(f"\n✅ Main shapefile: {os.path.basename(local_shapefile_path)}")
-        print(f"✅ All shapefile components downloaded to temp directory")
-        
+        print("✅ All shapefile components downloaded to temp directory")
+
     except Exception as e:
         print(f"❌ Error downloading shapefile components: {e}")
         # Clean up if error occurs
         if temp_shapefile_dir and os.path.exists(temp_shapefile_dir):
             import shutil
+
             shutil.rmtree(temp_shapefile_dir)
-        raise HTTPException(status_code=500, detail=f"Failed to download shapefile: {str(e)}")
-    
+        raise HTTPException(
+            status_code=500, detail=f"Failed to download shapefile: {str(e)}"
+        )
+
     # =========================
     # 5. VARIABLE MAPPING
     # =========================
     var_map = {
         "rainfall": "Rain",
-        "tmin": "Tmin", 
-        "tmax": "Tmax"
+        "tmin": "Tmin",
+        "tmax": "Tmax",
     }
-    
+
     # =========================
     # 6. GENERATE MAPS FOR EACH VARIABLE
     # =========================
-    outputs = []
-    
+    outputs: List[MapOutput] = []
+
     for variable in request.variables:
         col_name = var_map.get(variable)
         if not col_name:
             print(f"⚠️ Unknown variable: {variable}, skipping")
             continue
-        
-        print(f"\n{'='*50}")
+
+        print(f"\n{'=' * 50}")
         print(f"🔄 Generating {variable} map...")
-        print(f"{'='*50}")
-        
+        print(f"{'=' * 50}")
+
         try:
             # Generate map with downloaded files
             image_bytes, filename = create_weather_map(
                 county_name=request.county if request.county != "—" else None,
                 variable=col_name,
                 data_file=temp_csv,
-                shapefile_path=local_shapefile_path  # Path to .shp file
+                shapefile_path=local_shapefile_path,  # Path to .shp file
             )
-            
+
             print(f"✅ Map generated: {filename} ({len(image_bytes)} bytes)")
-            
+
             # Create storage path
-            timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
-            storage_path = f"users/{user_id}/maps/week_{request.report_week}_{request.report_year}/{variable}_{timestamp}.png"
-            
+            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            storage_path = (
+                f"users/{user_id}/maps/"
+                f"week_{request.report_week}_{request.report_year}/{variable}_{timestamp}.png"
+            )
+
             # Upload to Supabase Storage
             supabase_admin.storage.from_(BUCKET_NAME).upload(
                 path=storage_path,
                 file=image_bytes,
-                file_options={"content-type": "image/png"}
+                file_options={"content-type": "image/png"},
             )
             print(f"✅ Uploaded to storage: {storage_path}")
-            
-            # ========== FIXED URL GENERATION ==========
-            # Try multiple methods to get a working URL
+
+            # ========== URL GENERATION ==========
             map_url = None
-            
-            # Method 1: Signed URL (works for both public and private buckets)
+
+            # Method 1: Signed URL
             try:
                 signed_result = supabase_admin.storage.from_(BUCKET_NAME).create_signed_url(
-                    storage_path, 
-                    expires_in=604800  # 1 week in seconds
+                    storage_path,
+                    expires_in=604800,  # 1 week in seconds
                 )
-                map_url = signed_result['signedURL']
-                print(f"✅ Generated signed URL (expires in 1 week)")
+                map_url = signed_result["signedURL"]
+                print("✅ Generated signed URL (expires in 1 week)")
             except Exception as e:
                 print(f"⚠️ Signed URL failed: {e}")
-                
+
                 # Method 2: Public URL
                 try:
-                    map_url = supabase_admin.storage.from_(BUCKET_NAME).get_public_url(storage_path)
-                    print(f"✅ Generated public URL")
+                    map_url = supabase_admin.storage.from_(BUCKET_NAME).get_public_url(
+                        storage_path
+                    )
+                    print("✅ Generated public URL")
                 except Exception as e2:
                     print(f"⚠️ Public URL failed: {e2}")
-                    
+
                     # Method 3: Manual construction as last resort
                     try:
-                        # Extract project ID from Supabase URL
-                        project_id = settings.SUPABASE_URL.replace('https://', '').split('.')[0]
-                        map_url = f"https://{project_id}.supabase.co/storage/v1/object/public/{BUCKET_NAME}/{storage_path}"
-                        print(f"✅ Manually constructed URL")
+                        project_id = (
+                            settings.SUPABASE_URL.replace("https://", "").split(".")[0]
+                        )
+                        map_url = (
+                            f"https://{project_id}.supabase.co/storage/v1/"
+                            f"object/public/{BUCKET_NAME}/{storage_path}"
+                        )
+                        print("✅ Manually constructed URL")
                     except Exception as e3:
                         print(f"❌ All URL methods failed: {e3}")
-                        raise Exception("Could not generate accessible URL for map")
-            # ===========================================
-            
+                        raise Exception(
+                            "Could not generate accessible URL for map"
+                        )
+
             # Save record to generated_maps table
             map_record = {
                 "user_id": user_id,
@@ -563,42 +590,229 @@ async def generate_maps(
                 "storage_path": storage_path,
                 "report_week": request.report_week,
                 "report_year": request.report_year,
-                "created_at": datetime.utcnow().isoformat()
+                "created_at": datetime.utcnow().isoformat(),
             }
-            
+
             supabase.table("generated_maps").insert(map_record).execute()
-            print(f"✅ Database record saved")
-            
-            outputs.append(MapOutput(
-                variable=variable,
-                map_url=map_url
-            ))
-            
+            print("✅ Database record saved")
+
+            outputs.append(MapOutput(variable=variable, map_url=map_url))
+
         except Exception as e:
             print(f"❌ Error generating {variable} map: {e}")
             # Continue with other variables
-            pass
-    
+            continue
+
     # =========================
     # 7. CLEAN UP TEMP FILES
     # =========================
     import shutil
-    
+
     # Remove temp CSV
     if temp_csv and os.path.exists(temp_csv):
         os.remove(temp_csv)
-        print(f"\n✅ Temp CSV cleaned up")
-    
+        print("\n✅ Temp CSV cleaned up")
+
     # Remove shapefile temp directory
     if temp_shapefile_dir and os.path.exists(temp_shapefile_dir):
         shutil.rmtree(temp_shapefile_dir)
-        print(f"✅ Shapefile temp directory cleaned up")
-    
-    print(f"\n{'='*60}")
+        print("✅ Shapefile temp directory cleaned up")
+
+    print(f"\n{'=' * 60}")
     print(f"✅ MAP GENERATION COMPLETE: {len(outputs)} maps created")
-    print(f"{'='*60}\n")
-    
+    print(f"{'=' * 60}\n")
+
     if not outputs:
         raise HTTPException(status_code=500, detail="No maps were generated successfully")
-    
+
     return MapGenerationResponse(outputs=outputs)
+
+
+# ============================================================================
+# STEP 4: GENERATE FINAL PDF REPORT
+# ============================================================================
+@router.post("/generate-report", response_model=ReportGenerationResponse)
+async def generate_report(
+    request: ReportGenerationRequest,
+    user=Depends(get_current_user),
+):
+    """
+    Step 4: Generate the final weekly PDF report and store it in Supabase.
+
+    This implementation uses a minimal structured payload to drive the
+    `generate_weekly_forecast_pdf` helper, so that manual generation
+    completes end-to-end even before full AI narration is wired in.
+    """
+    print("\n" + "=" * 60)
+    print("📄 REPORT GENERATION STARTED")
+    print("=" * 60)
+
+    supabase_admin = get_supabase_admin()
+    user_id = user.id if hasattr(user, "id") else user.get("id")
+
+    print(f"👤 User ID: {user_id}")
+    print(f"📍 County: {request.county_name}")
+    print(
+        f"📅 Week: {request.week_number}, Year: {request.year}, "
+        f"Period: {request.report_start_at} to {request.report_end_at}"
+    )
+
+    # ------------------------------------------------------------------
+    # 1. Build minimal structured data + narration for the PDF helper
+    # ------------------------------------------------------------------
+    issue_date = datetime.utcnow().strftime("%Y-%m-%d")
+    period_str = f"{request.report_start_at} to {request.report_end_at}"
+
+    data = {
+        "meta": {
+            "station": request.county_name,
+            "county": request.county_name,
+            "issue_date": issue_date,
+            "period": period_str,
+        },
+        # A single generic "County" section with placeholder content
+        "sub_counties": [
+            {
+                "title": request.county_name,
+                "days": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+                "forecast": {
+                    day: {
+                        "Morning": "No detailed forecast available.",
+                        "Afternoon": "No detailed forecast available.",
+                        "Night": "No detailed forecast available.",
+                        "Rainfall distribution": "Refer to generated maps where available.",
+                        "Maximum temperature": "Data not yet synthesized.",
+                        "Minimum temperature": "Data not yet synthesized.",
+                        "Winds": "Data not yet synthesized.",
+                    }
+                    for day in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+                },
+            }
+        ],
+        "marine": {
+            "daily_wind": {
+                "Day 1": "N/A",
+                "Day 2": "N/A",
+                "Day 3": "N/A",
+                "Day 4": "N/A",
+                "Day 5": "N/A",
+                "Day 6": "N/A",
+                "Day 7": "N/A",
+            }
+        },
+    }
+
+    narration = {
+        "weekly_summary_text": (
+            f"This is an automatically generated weekly weather summary for "
+            f"{request.county_name} for the period {period_str}. "
+            "Detailed narratives are not yet available, but the report "
+            "includes the selected variables and reference information."
+        ),
+        "marine_summary_text": (
+            "Marine weather details are not yet synthesized for this report. "
+            "Please consult official marine forecasts where applicable."
+        ),
+    }
+
+    # Map image is optional – we can leave this out for now
+    map_path = None
+
+    # ------------------------------------------------------------------
+    # 2. Generate PDF to a temporary file
+    # ------------------------------------------------------------------
+    filename = (
+        f"{request.county_name.replace(' ', '_').lower()}_week_"
+        f"{request.week_number}_{request.year}.pdf"
+    )
+
+    temp_dir = tempfile.mkdtemp(prefix="weekly_report_")
+    output_path = os.path.join(temp_dir, filename)
+
+    try:
+        print(f"📝 Generating PDF at: {output_path}")
+        generate_weekly_forecast_pdf(
+            data=data,
+            narration=narration,
+            map_path=map_path,
+            output_path=output_path,
+        )
+        print("✅ PDF generation complete")
+    except Exception as e:
+        print(f"❌ Failed to generate PDF: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate report PDF")
+
+    # ------------------------------------------------------------------
+    # 3. Upload PDF to Supabase Storage and create DB record
+    # ------------------------------------------------------------------
+    try:
+        with open(output_path, "rb") as f:
+            pdf_bytes = f.read()
+
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        storage_path = (
+            f"users/{user_id}/reports/"
+            f"week_{request.week_number}_{request.year}/report_{timestamp}.pdf"
+        )
+
+        print(f"⬆️ Uploading PDF to storage: {storage_path}")
+        supabase_admin.storage.from_(BUCKET_NAME).upload(
+            path=storage_path,
+            file=pdf_bytes,
+            file_options={"content-type": "application/pdf"},
+        )
+
+        # Store as "<bucket>/<path>" so existing download route can split it
+        file_path = f"{BUCKET_NAME}/{storage_path}"
+
+        generation_date = datetime.utcnow().isoformat()
+        report_record = {
+            "user_id": user_id,
+            "generation_date": generation_date,
+            "status": "success",
+            "file_path": file_path,
+            "report_week": request.week_number,
+            "report_year": request.year,
+            "county_name": request.county_name,
+        }
+
+        print("💾 Saving generated_reports record")
+        insert_result = (
+            supabase_admin.table("generated_reports")
+            .insert(report_record)
+            .execute()
+        )
+
+        rows = insert_result.data or []
+        if not rows:
+            raise Exception("Insert into generated_reports returned no rows")
+
+        report_id = rows[0]["id"]
+        pdf_url = f"/api/v1/reports/download/{report_id}"
+
+        print("✅ Report record created")
+
+    except Exception as e:
+        print(f"❌ Failed to upload or save report record: {e}")
+        raise HTTPException(status_code=500, detail="Failed to store generated report")
+    finally:
+        # Clean up temp directory
+        try:
+            import shutil
+
+            if os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir)
+                print("🧹 Temp report directory cleaned up")
+        except Exception as cleanup_err:
+            print(f"⚠️ Failed to clean up temp directory: {cleanup_err}")
+
+    print("\n" + "=" * 60)
+    print("✅ REPORT GENERATION COMPLETE")
+    print("=" * 60 + "\n")
+
+    return ReportGenerationResponse(
+        pdf_url=pdf_url,
+        filename=filename,
+        report_week=request.week_number,
+        report_year=request.year,
+    )
