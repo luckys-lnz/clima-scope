@@ -2,9 +2,11 @@
 
 # dependencies
 /node_modules
+/frontend/node_modules/
 
 # next.js
 /.next/
+/frontend/.next/
 /out/
 /dist/
 .cursor/

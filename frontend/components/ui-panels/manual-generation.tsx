@@ -148,9 +148,14 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
 
   // ===== STEP 4: REPORT GENERATION (USING WORKFLOW SERVICE) =====
   const handleGenerateReport = async () => {
-    if (!reportWindow || !sessionToken) return
+    if (!reportWindow || !sessionToken) {
+      const errorMsg = !sessionToken ? "No active session" : "No active reporting period"
+      addLog(`✗ Report generation blocked: ${errorMsg}`)
+      setErrorMessage(errorMsg)
+      return
+    }
 
-    addLog("Stage 4: Generating final report…")
+    addLog("Stage 4: Starting report generation workflow…")
     setIsGenerating(true)
     setErrorMessage("")
 
@@ -166,6 +171,13 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
 
       const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
       setDownloadUrl(`${baseUrl}${result.pdf_url}`)
+
+      if (result.stage_statuses?.length) {
+        result.stage_statuses.forEach((s) => {
+          const prefix = s.status === "failed" ? "✗" : s.status === "in_progress" ? "…" : "✓"
+          addLog(`${prefix} [${s.stage}] ${s.message}`)
+        })
+      }
 
       addLog(`✓ Report generated: ${result.filename}`)
       addLog("Workflow complete")

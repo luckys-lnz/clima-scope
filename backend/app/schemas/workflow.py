@@ -148,3 +148,29 @@ class DetailedValidationResponse(ValidationResponse):
     variable_detection: List[VariableDetection] = Field(default_factory=list)
     file_size_kb: Optional[float] = None
     shapefile_details: Optional[Dict[str, Any]] = None
+
+
+# ============================================
+# Report Generation (Step 4)
+# ============================================
+
+
+class ReportGenerationRequest(BaseModel):
+    """Request payload for generating the final weekly PDF report."""
+
+    county_name: str
+    week_number: int
+    year: int
+    report_start_at: str
+    report_end_at: str
+    variables: List[str] = Field(default_factory=list)
+
+
+class ReportGenerationResponse(BaseModel):
+    """Response returned after generating the final report."""
+
+    pdf_url: str
+    filename: str
+    report_week: int
+    report_year: int
+    stage_statuses: List[Dict[str, str]] = Field(default_factory=list)
