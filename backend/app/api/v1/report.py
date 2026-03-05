@@ -37,9 +37,9 @@ async def get_user_reports(user=Depends(get_current_user)):
     # ---- get user's reports ----
     try:
         reports_response = supabase.table("generated_reports")\
-            .select("id, generation_date, status, file_path")\
+            .select("id, generated_at, status, file_path")\
             .eq("user_id", user_id)\
-            .order("generation_date", desc=True)\
+            .order("generated_at", desc=True)\
             .execute()
         
         rows = reports_response.data or []
@@ -50,7 +50,7 @@ async def get_user_reports(user=Depends(get_current_user)):
     reports: List[ReportArchiveItem] = []
 
     for r in rows:
-        gen_date = r.get("generation_date")
+        gen_date = r.get("generated_at")
         if not gen_date:
             continue
 

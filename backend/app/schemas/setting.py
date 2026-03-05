@@ -9,6 +9,7 @@ class SharedFileResponse(BaseModel):
     file_name: str
     file_type: str
     upload_date: datetime
+    file_path: Optional[str] = None
 
 
 class UserSettingsResponse(BaseModel):
@@ -23,4 +24,4 @@ class SettingsResponse(BaseModel):
 
 
 class UpdateSettingsRequest(BaseModel):
-    pdf_template_id: UUID
+    pdf_template_id: Optional[UUID] = None

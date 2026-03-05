@@ -1,12 +1,17 @@
 import { SettingsResponse } from "@/lib/models/setting"
-import { getAuthHeaders, handleTokenExpired } from "@/lib/utils/auth"
+import { handleTokenExpired } from "@/lib/utils/auth"
+import { authService } from "@/lib/services/authService"
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
 export class SettingsService {
   static async getSettings(token: string): Promise<SettingsResponse> {
+    const accessToken = await authService.getValidAccessToken(token)
     const res = await fetch(`${API_BASE}/api/v1/setting`, {
-      headers: getAuthHeaders(token),
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
     })
 
     if (res.status === 401) {
@@ -22,9 +27,13 @@ export class SettingsService {
   }
 
   static async updateTemplate(token: string, pdfTemplateId: string | null) {
+    const accessToken = await authService.getValidAccessToken(token)
     const res = await fetch(`${API_BASE}/api/v1/setting`, {
       method: "PUT",
-      headers: getAuthHeaders(token),
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({
         pdf_template_id: pdfTemplateId,
       }),

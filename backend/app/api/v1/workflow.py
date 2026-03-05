@@ -5,7 +5,7 @@ import logging
 import os
 import tempfile
 from datetime import datetime
-from typing import List
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
 
 from app.core.supabase import get_supabase_anon, get_supabase_admin
@@ -30,6 +30,105 @@ logger = logging.getLogger(__name__)
 
 # Get bucket name from settings
 BUCKET_NAME = settings.SUPABASE_STORAGE_BUCKET
+
+
+def get_or_create_workflow_status(
+    supabase_admin,
+    user_id: str,
+    report_week: int,
+    report_year: int,
+    observation_file_id: Optional[str] = None,
+) -> Optional[int]:
+    """Get existing workflow row for period or create a new one."""
+    try:
+        existing = (
+            supabase_admin.table("workflow_status")
+            .select("id")
+            .eq("user_id", user_id)
+            .eq("report_week", report_week)
+            .eq("report_year", report_year)
+            .limit(1)
+            .execute()
+        )
+        if existing.data:
+            return existing.data[0]["id"]
+
+        insert_payload: Dict[str, Any] = {
+            "user_id": user_id,
+            "report_week": report_week,
+            "report_year": report_year,
+            "uploaded": False,
+            "aggregated": False,
+            "mapped": False,
+            "generated": False,
+            "completed": False,
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat(),
+        }
+        if observation_file_id:
+            insert_payload["observation_file_id"] = observation_file_id
+
+        created = supabase_admin.table("workflow_status").insert(insert_payload).execute()
+        rows = created.data or []
+        if rows:
+            return rows[0]["id"]
+    except Exception as exc:
+        print(f"⚠️ Failed to get/create workflow_status: {exc}")
+    return None
+
+
+def update_workflow_status_flags(
+    supabase_admin,
+    workflow_status_id: int,
+    flags: Dict[str, Any],
+) -> None:
+    """Update workflow_status with known schema flags only."""
+    allowed_keys = {
+        "uploaded",
+        "aggregated",
+        "mapped",
+        "generated",
+        "completed",
+        "observation_file_id",
+        "generated_report_id",
+    }
+    update_payload = {k: v for k, v in flags.items() if k in allowed_keys}
+    if not update_payload:
+        return
+    update_payload["updated_at"] = datetime.utcnow().isoformat()
+    try:
+        (
+            supabase_admin.table("workflow_status")
+            .update(update_payload)
+            .eq("id", workflow_status_id)
+            .execute()
+        )
+    except Exception as exc:
+        print(f"⚠️ Failed to update workflow_status flags: {exc}")
+
+
+def append_workflow_log(
+    supabase_admin,
+    workflow_status_id: Optional[int],
+    stage: str,
+    status: str,
+    message: str,
+) -> None:
+    """Append a workflow log row; non-blocking on failure."""
+    if workflow_status_id is None:
+        return
+    try:
+        supabase_admin.table("workflow_logs").insert(
+            {
+                "workflow_status_id": workflow_status_id,
+                "stage": stage,
+                "status": status,
+                "message": message,
+                "created_at": datetime.utcnow().isoformat(),
+            }
+        ).execute()
+    except Exception as exc:
+        print(f"⚠️ Failed to append workflow log: {exc}")
 
 # ===== Map Generation Schemas =====
 class MapGenerationRequest(BaseModel):
@@ -66,7 +165,9 @@ async def validate_inputs(
     print("="*60)
     
     supabase = get_supabase_anon()
+    supabase_admin = get_supabase_admin()
     user_id = user.id if hasattr(user, "id") else user.get("id")
+    workflow_status_id: Optional[int] = None
     
     print(f"👤 User ID: {user_id}")
     print(f"🪣 Using bucket: {BUCKET_NAME}")
@@ -175,12 +276,39 @@ async def validate_inputs(
 
     if not uploads:
         print("\n❌ VALIDATION FAILED: No observation file found")
+        workflow_status_id = get_or_create_workflow_status(
+            supabase_admin=supabase_admin,
+            user_id=user_id,
+            report_week=request.report_week,
+            report_year=request.report_year,
+        )
+        append_workflow_log(
+            supabase_admin,
+            workflow_status_id,
+            stage="validate_inputs",
+            status="error",
+            message="Validation failed: observation file not found",
+        )
         raise HTTPException(
             status_code=404, 
             detail=f"No observation file found for week {request.report_week}, {request.report_year}. Please upload the observation file for this reporting period."
         )
 
     obs = uploads[0]
+    workflow_status_id = get_or_create_workflow_status(
+        supabase_admin=supabase_admin,
+        user_id=user_id,
+        report_week=request.report_week,
+        report_year=request.report_year,
+        observation_file_id=obs["id"],
+    )
+    append_workflow_log(
+        supabase_admin,
+        workflow_status_id,
+        stage="validate_inputs",
+        status="info",
+        message="Starting validation for observation and shapefile inputs",
+    )
     print(f"\n✅ Using observation file: {obs['file_name']}")
     print(f"   Week: {obs['report_week']}")
     print(f"   Path: {obs['file_path']}")
@@ -213,6 +341,13 @@ async def validate_inputs(
         shapes = []
 
     if not shapes:
+        append_workflow_log(
+            supabase_admin,
+            workflow_status_id,
+            stage="validate_inputs",
+            status="error",
+            message="Validation failed: shapefile not found",
+        )
         raise HTTPException(status_code=404, detail="No shapefile uploaded. Please contact administrator.")
 
     shp = shapes[0]
@@ -240,6 +375,13 @@ async def validate_inputs(
         
     except Exception as e:
         print(f"❌ Failed to read observation file: {e}")
+        append_workflow_log(
+            supabase_admin,
+            workflow_status_id,
+            stage="validate_inputs",
+            status="error",
+            message="Validation failed: could not read observation file",
+        )
         raise HTTPException(status_code=400, detail=f"Failed to read observation file: {str(e)}")
 
     # =========================
@@ -278,50 +420,32 @@ async def validate_inputs(
     print("\n" + "-"*40)
     print("💾 UPDATING WORKFLOW STATUS")
     print("-"*40)
-    
-    try:
-        workflow_check = supabase.table("workflow_status")\
-            .select("id")\
-            .eq("user_id", user_id)\
-            .eq("report_week", request.report_week)\
-            .eq("report_year", request.report_year)\
-            .execute()
-        
-        workflow_data = {
-            "validated": True,
-            "variables_found": found,
-            "observation_file_id": obs["id"],
-            "shapefile_id": shp["id"],
-            "updated_at": datetime.utcnow().isoformat()
-        }
-        
-        if workflow_check.data:
-            print("🔄 Updating existing workflow record")
-            supabase.table("workflow_status")\
-                .update(workflow_data)\
-                .eq("user_id", user_id)\
-                .eq("report_week", request.report_week)\
-                .eq("report_year", request.report_year)\
-                .execute()
-        else:
-            print("➕ Creating new workflow record")
-            workflow_data.update({
-                "user_id": user_id,
-                "report_week": request.report_week,
-                "report_year": request.report_year,
-                "report_start_at": request.report_start_at,
-                "report_end_at": request.report_end_at,
+    if workflow_status_id is None:
+        workflow_status_id = get_or_create_workflow_status(
+            supabase_admin=supabase_admin,
+            user_id=user_id,
+            report_week=request.report_week,
+            report_year=request.report_year,
+            observation_file_id=obs["id"],
+        )
+    if workflow_status_id is not None:
+        update_workflow_status_flags(
+            supabase_admin=supabase_admin,
+            workflow_status_id=workflow_status_id,
+            flags={
                 "uploaded": True,
-                "created_at": datetime.utcnow().isoformat()
-            })
-            supabase.table("workflow_status")\
-                .insert(workflow_data)\
-                .execute()
-        
+                "aggregated": True,
+                "observation_file_id": obs["id"],
+            },
+        )
+        append_workflow_log(
+            supabase_admin,
+            workflow_status_id,
+            stage="validate_inputs",
+            status="success",
+            message=f"Validation completed: {len(found)} variables detected",
+        )
         print("✅ Workflow status updated")
-                
-    except Exception as e:
-        print(f"⚠️ Failed to update workflow status: {e}")
 
     # =========================
     # 6️⃣ RETURN RESPONSE
@@ -367,6 +491,19 @@ async def generate_maps(
     supabase = get_supabase_anon()
     supabase_admin = get_supabase_admin()
     user_id = user.id if hasattr(user, "id") else user.get("id")
+    workflow_status_id: Optional[int] = get_or_create_workflow_status(
+        supabase_admin=supabase_admin,
+        user_id=user_id,
+        report_week=request.report_week,
+        report_year=request.report_year,
+    )
+    append_workflow_log(
+        supabase_admin,
+        workflow_status_id,
+        stage="generate_maps",
+        status="info",
+        message=f"Starting map generation for {len(request.variables)} variable(s)",
+    )
 
     print(f"👤 User ID: {user_id}")
     print(f"📍 County: {request.county}")
@@ -589,6 +726,7 @@ async def generate_maps(
             # Save record to generated_maps table
             map_record = {
                 "user_id": user_id,
+                "workflow_status_id": workflow_status_id,
                 "variable": variable,
                 "map_url": map_url,
                 "storage_path": storage_path,
@@ -604,6 +742,13 @@ async def generate_maps(
 
         except Exception as e:
             print(f"❌ Error generating {variable} map: {e}")
+            append_workflow_log(
+                supabase_admin,
+                workflow_status_id,
+                stage="generate_maps",
+                status="error",
+                message=f"Failed generating map for variable: {variable}",
+            )
             # Continue with other variables
             continue
 
@@ -627,7 +772,28 @@ async def generate_maps(
     print(f"{'=' * 60}\n")
 
     if not outputs:
+        append_workflow_log(
+            supabase_admin,
+            workflow_status_id,
+            stage="generate_maps",
+            status="error",
+            message="Map generation failed: no map outputs created",
+        )
         raise HTTPException(status_code=500, detail="No maps were generated successfully")
+
+    if workflow_status_id is not None:
+        update_workflow_status_flags(
+            supabase_admin=supabase_admin,
+            workflow_status_id=workflow_status_id,
+            flags={"mapped": True},
+        )
+        append_workflow_log(
+            supabase_admin,
+            workflow_status_id,
+            stage="generate_maps",
+            status="success",
+            message=f"Map generation complete: {len(outputs)} map(s) created",
+        )
 
     return MapGenerationResponse(outputs=outputs)
 
@@ -676,6 +842,12 @@ async def generate_report(
         )
 
     add_stage("report_generation", "in_progress", "Step 4 started")
+    workflow_status_id: Optional[int] = get_or_create_workflow_status(
+        supabase_admin=supabase_admin,
+        user_id=user_id,
+        report_week=request.week_number,
+        report_year=request.year,
+    )
 
     # ------------------------------------------------------------------
     # 1. Gather observation + map context for AI narration
@@ -688,7 +860,7 @@ async def generate_report(
         )
         upload = (
             supabase_admin.table("uploads")
-            .select("file_name,file_path")
+            .select("id,file_name,file_path")
             .eq("user_id", user_id)
             .eq("file_type", "observations")
             .eq("report_week", request.week_number)
@@ -712,6 +884,12 @@ async def generate_report(
             )
 
         obs = upload.data[0]
+        if workflow_status_id is not None:
+            update_workflow_status_flags(
+                supabase_admin=supabase_admin,
+                workflow_status_id=workflow_status_id,
+                flags={"observation_file_id": obs["id"], "uploaded": True},
+            )
         observation_bytes = supabase_admin.storage.from_(BUCKET_NAME).download(
             obs["file_path"]
         )
@@ -735,6 +913,7 @@ async def generate_report(
         )
         raise HTTPException(status_code=500, detail="Failed to read observation data")
 
+    rainfall_map_storage_path = None
     try:
         add_stage(
             "map_context",
@@ -769,6 +948,11 @@ async def generate_report(
                         "storage_path": row.get("storage_path", ""),
                     }
                 )
+
+        # Prefer rainfall map for the PDF cover page map slot.
+        rainfall_row = latest_maps_by_var.get("rainfall") or latest_maps_by_var.get("rain")
+        if rainfall_row:
+            rainfall_map_storage_path = rainfall_row.get("storage_path")
         add_stage(
             "map_context",
             "completed",
@@ -786,6 +970,13 @@ async def generate_report(
     # ------------------------------------------------------------------
     # 2. Generate AI narration from maps + observation summary
     # ------------------------------------------------------------------
+    append_workflow_log(
+        supabase_admin,
+        workflow_status_id,
+        stage="generate_narration",
+        status="info",
+        message="Generating AI narration from map and observation context",
+    )
     add_stage(
         "ai_narration",
         "in_progress",
@@ -814,10 +1005,52 @@ async def generate_report(
             "completed",
             f"AI narration generated via {narration_source}",
         )
+    append_workflow_log(
+        supabase_admin,
+        workflow_status_id,
+        stage="generate_narration",
+        status="success",
+        message=f"Narration generated via {narration_source}",
+    )
 
     # ------------------------------------------------------------------
     # 3. Build structured data payload for the PDF helper
     # ------------------------------------------------------------------
+    profile = {}
+    try:
+        profile_response = (
+            supabase_admin.table("profiles")
+            .select("*")
+            .eq("id", user_id)
+            .limit(1)
+            .execute()
+        )
+        if profile_response.data:
+            profile = profile_response.data[0]
+    except Exception as e:
+        print(f"⚠️ Failed to fetch profile for sign-off details: {e}")
+
+    signoff_name = profile.get("full_name") or "N/A"
+    county_for_title = profile.get("county") or request.county_name
+    signoff_title = (
+        profile.get("job_title")
+        or profile.get("title")
+        or f"County Director of Meteorological Services, {county_for_title} County."
+    )
+    signoff_mobile = profile.get("phone") or "N/A"
+    signoff_email = profile.get("email") or getattr(user, "email", None)
+    if not signoff_email and isinstance(user, dict):
+        signoff_email = user.get("email")
+    if not signoff_email:
+        signoff_email = "N/A"
+
+    signoff = {
+        "name": signoff_name,
+        "job_title": signoff_title,
+        "mobile": signoff_mobile,
+        "email": signoff_email,
+    }
+
     issue_date = datetime.utcnow().strftime("%Y-%m-%d")
     period_str = f"{request.report_start_at} to {request.report_end_at}"
 
@@ -860,9 +1093,6 @@ async def generate_report(
         },
     }
 
-    # Map image is optional – we can leave this out for now
-    map_path = None
-
     # ------------------------------------------------------------------
     # 4. Generate PDF to a temporary file
     # ------------------------------------------------------------------
@@ -873,8 +1103,50 @@ async def generate_report(
 
     temp_dir = tempfile.mkdtemp(prefix="weekly_report_")
     output_path = os.path.join(temp_dir, filename)
+    map_path = None
+
+    # Try to attach rainfall distribution map below issue/period on cover page.
+    if rainfall_map_storage_path:
+        try:
+            add_stage(
+                "map_attachment",
+                "in_progress",
+                "Fetching rainfall distribution map for report cover",
+            )
+            map_bytes = supabase_admin.storage.from_(BUCKET_NAME).download(
+                rainfall_map_storage_path
+            )
+            map_path = os.path.join(temp_dir, "rainfall_distribution_map.png")
+            with open(map_path, "wb") as map_file:
+                map_file.write(map_bytes)
+            add_stage(
+                "map_attachment",
+                "completed",
+                "Rainfall distribution map attached to report cover",
+            )
+        except Exception as e:
+            print(f"⚠️ Failed to attach rainfall map: {e}")
+            map_path = None
+            add_stage(
+                "map_attachment",
+                "failed",
+                "Could not attach rainfall map; continuing without cover map",
+            )
+    else:
+        add_stage(
+            "map_attachment",
+            "completed",
+            "No rainfall map found for this window; report generated without cover map",
+        )
 
     try:
+        append_workflow_log(
+            supabase_admin,
+            workflow_status_id,
+            stage="generate_pdf",
+            status="info",
+            message="Generating PDF document",
+        )
         add_stage("pdf_generation", "in_progress", "Generating PDF document")
         print(f"📝 Generating PDF at: {output_path}")
         generate_weekly_forecast_pdf(
@@ -882,18 +1154,40 @@ async def generate_report(
             narration=narration,
             map_path=map_path,
             output_path=output_path,
+            signoff=signoff,
         )
         print("✅ PDF generation complete")
         add_stage("pdf_generation", "completed", "PDF document generated")
+        append_workflow_log(
+            supabase_admin,
+            workflow_status_id,
+            stage="generate_pdf",
+            status="success",
+            message="PDF document generated",
+        )
     except Exception as e:
         print(f"❌ Failed to generate PDF: {e}")
         add_stage("pdf_generation", "failed", "Failed to generate report PDF")
+        append_workflow_log(
+            supabase_admin,
+            workflow_status_id,
+            stage="generate_pdf",
+            status="error",
+            message="Failed to generate PDF document",
+        )
         raise HTTPException(status_code=500, detail="Failed to generate report PDF")
 
     # ------------------------------------------------------------------
     # 5. Upload PDF to Supabase Storage and create DB record
     # ------------------------------------------------------------------
     try:
+        append_workflow_log(
+            supabase_admin,
+            workflow_status_id,
+            stage="store_report",
+            status="info",
+            message="Uploading generated report and saving metadata",
+        )
         add_stage("storage_upload", "in_progress", "Uploading generated PDF to storage")
         with open(output_path, "rb") as f:
             pdf_bytes = f.read()
@@ -914,15 +1208,13 @@ async def generate_report(
         # Store as "<bucket>/<path>" so existing download route can split it
         file_path = f"{BUCKET_NAME}/{storage_path}"
 
-        generation_date = datetime.utcnow().isoformat()
         report_record = {
             "user_id": user_id,
-            "generation_date": generation_date,
+            "observation_file_id": obs.get("id"),
+            "template_file_id": None,
             "status": "success",
             "file_path": file_path,
-            "report_week": request.week_number,
-            "report_year": request.year,
-            "county_name": request.county_name,
+            "generated_at": datetime.utcnow().isoformat(),
         }
 
         print("💾 Saving generated_reports record")
@@ -945,6 +1237,30 @@ async def generate_report(
             "completed",
             "PDF uploaded and report record created",
         )
+        if workflow_status_id is not None:
+            update_workflow_status_flags(
+                supabase_admin=supabase_admin,
+                workflow_status_id=workflow_status_id,
+                flags={
+                    "generated": True,
+                    "completed": True,
+                    "generated_report_id": report_id,
+                },
+            )
+        append_workflow_log(
+            supabase_admin,
+            workflow_status_id,
+            stage="store_report",
+            status="success",
+            message="Report metadata saved successfully",
+        )
+        append_workflow_log(
+            supabase_admin,
+            workflow_status_id,
+            stage="workflow_complete",
+            status="success",
+            message="Workflow completed successfully",
+        )
 
     except Exception as e:
         print(f"❌ Failed to upload or save report record: {e}")
@@ -952,6 +1268,13 @@ async def generate_report(
             "storage_upload",
             "failed",
             "Failed to store generated report",
+        )
+        append_workflow_log(
+            supabase_admin,
+            workflow_status_id,
+            stage="store_report",
+            status="error",
+            message="Failed to store report metadata",
         )
         raise HTTPException(status_code=500, detail="Failed to store generated report")
     finally:

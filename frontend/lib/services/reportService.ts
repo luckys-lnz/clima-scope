@@ -1,5 +1,6 @@
 import { ReportArchiveItem } from "@/lib/models/report"
-import { getAuthHeaders, handleTokenExpired } from "@/lib/utils/auth"
+import { handleTokenExpired } from "@/lib/utils/auth"
+import { authService } from "@/lib/services/authService"
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
@@ -8,8 +9,12 @@ export class ReportService {
    * Fetch all reports for the current user
    */
   static async getReports(token: string): Promise<ReportArchiveItem[]> {
+    const accessToken = await authService.getValidAccessToken(token)
     const res = await fetch(`${API_BASE}/api/v1/reports`, {
-      headers: getAuthHeaders(token),
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
     })
 
     if (res.status === 401) {
@@ -28,8 +33,12 @@ export class ReportService {
    * Download a report PDF via secure backend route
    */
   static async downloadReport(token: string, reportId: string) {
+    const accessToken = await authService.getValidAccessToken(token)
     const res = await fetch(`${API_BASE}/api/v1/reports/download/${reportId}`, {
-      headers: getAuthHeaders(token),
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
     })
 
     if (res.status === 401) {

@@ -8,6 +8,7 @@ from app.schemas.setting import (
 from app.api.v1.auth import get_current_user
 from app.core.supabase import get_supabase_anon
 from uuid import UUID
+from datetime import datetime
 import logging
 from typing import List, Optional
 
@@ -27,7 +28,7 @@ async def get_settings(user=Depends(get_current_user)):
     try:
         templates_response = supabase.table("shared_files")\
             .select("id, file_name, file_type, upload_date, file_path")\
-            .eq("file_type", "templates")\
+            .in_("file_type", ["templates", "template"])\
             .execute()
         
         templates_data = templates_response.data or []
@@ -62,15 +63,15 @@ async def get_settings(user=Depends(get_current_user)):
     try:
         shapefiles_response = supabase.table("shared_files")\
             .select("id, file_name, file_path")\
-            .eq("file_type", "shapefile")\
+            .in_("file_type", ["shapefile", "shapefiles"])\
             .execute()
         
         shapefiles_data = shapefiles_response.data or []
         
-        # Find the .shp file
+        # Prefer the .shp file; fallback to first available shapefile row
         shapefile = next(
             (s for s in shapefiles_data if s.get("file_name", "").endswith('.shp')),
-            None
+            shapefiles_data[0] if shapefiles_data else None
         )
     except Exception as e:
         logger.error(f"Error fetching shapefiles: {e}")
@@ -78,7 +79,7 @@ async def get_settings(user=Depends(get_current_user)):
     
     return SettingsResponse(
         shapefile_name=shapefile.get("file_name") if shapefile else "Default Shapefile",
-        shapefile_path=shapefile.get("file_path") if shapefile else "/default/path.shp",
+        shapefile_path=shapefile.get("file_path") if shapefile else "",
         templates=templates,
         user_settings={
             "pdf_template_id": selected_template_id,

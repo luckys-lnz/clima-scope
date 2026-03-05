@@ -141,6 +141,7 @@ export function useAuth() {
 
   return {
     user: auth.user,
+    token: auth.access_token,
     access_token: auth.access_token,
     refresh_token: auth.refresh_token,  // ← ADD THIS
     isLoading: auth.isLoading,
