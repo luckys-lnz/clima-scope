@@ -5,6 +5,7 @@ from typing import Optional
 from app.api.v1.auth import get_current_user
 from app.core.supabase import get_supabase_anon
 from app.schemas.dashboard import DashboardOverviewResponse
+from app.utils.report_date import get_current_weekly_report_window
 
 router = APIRouter(tags=["dashboard"])
 
@@ -88,14 +89,21 @@ async def get_dashboard_overview(user=Depends(get_current_user)):
         counties_processed = 0
 
     # --------------------------------------------------
-    # WORKFLOW STEP (latest this week)
+    # WORKFLOW STEP (CURRENT REPORT WINDOW ONLY)
     # --------------------------------------------------
     workflow_step: Optional[str] = None
+    workflow_progress = None
+    current_window = get_current_weekly_report_window(datetime.now())
     
     try:
         workflows_response = supabase.table("workflow_status")\
-            .select("uploaded,aggregated,mapped,generated,completed,updated_at")\
+            .select(
+                "id,uploaded,aggregated,mapped,generated,completed,"
+                "report_week,report_year,updated_at"
+            )\
             .eq("user_id", user_id)\
+            .eq("report_week", current_window.week)\
+            .eq("report_year", current_window.year)\
             .order("updated_at", desc=True)\
             .limit(1)\
             .execute()
@@ -103,7 +111,7 @@ async def get_dashboard_overview(user=Depends(get_current_user)):
         if workflows_response.data:
             latest = workflows_response.data[0]
 
-            # Determine step based on booleans
+            # Determine step based on current schema booleans
             if latest.get("completed"):
                 workflow_step = "completed"
             elif latest.get("generated"):
@@ -114,11 +122,23 @@ async def get_dashboard_overview(user=Depends(get_current_user)):
                 workflow_step = "aggregated"
             elif latest.get("uploaded"):
                 workflow_step = "uploaded"
-            else:
-                workflow_step = "started"
+
+            workflow_status_id = latest.get("id")
+            if workflow_status_id is not None:
+                logs_response = (
+                    supabase.table("workflow_logs")
+                    .select("stage,status,message,created_at")
+                    .eq("workflow_status_id", workflow_status_id)
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+                if logs_response.data:
+                    workflow_progress = logs_response.data[0]
     except Exception as e:
         print(f"Error fetching workflow: {e}")
         workflow_step = None
+        workflow_progress = None
 
     return DashboardOverviewResponse(
         stats={
@@ -129,4 +149,11 @@ async def get_dashboard_overview(user=Depends(get_current_user)):
             "userReportsGenerated": user_reports_generated,
         },
         workflow_step=workflow_step,
+        current_window={
+            "week": current_window.week,
+            "year": current_window.year,
+            "start": current_window.start.date().isoformat(),
+            "end": current_window.end.date().isoformat(),
+        },
+        workflow_progress=workflow_progress,
     )

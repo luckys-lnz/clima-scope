@@ -15,7 +15,7 @@ interface ReportArchiveProps {
 }
 
 export function ReportArchive({ onSelectCounty }: ReportArchiveProps) {
-  const { token } = useAuth()
+  const { access_token: token, isLoading: authLoading } = useAuth()
 
   const [reports, setReports] = useState<ReportArchiveItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -24,20 +24,28 @@ export function ReportArchive({ onSelectCounty }: ReportArchiveProps) {
   const [filterStatus, setFilterStatus] = useState("")
 
   useEffect(() => {
-    if (!token) return
+    if (authLoading) return
+
+    if (!token) {
+      setReports([])
+      setLoading(false)
+      return
+    }
 
     const loadReports = async () => {
       try {
         setLoading(true)
         const data = await ReportService.getReports(token)
         setReports(data)
+      } catch {
+        setReports([])
       } finally {
         setLoading(false)
       }
     }
 
     loadReports()
-  }, [token])
+  }, [token, authLoading])
 
   // backend → UI mapping
   const uiReports = reports.map((r) => ({

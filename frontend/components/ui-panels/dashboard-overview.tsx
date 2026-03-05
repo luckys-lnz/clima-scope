@@ -45,13 +45,15 @@ export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
   if (loading) return <div className="p-6">Loading dashboard…</div>
   if (error || !data) return <div className="p-6 text-red-500">{error || "No data"}</div>
 
-  const { stats, workflow_step } = data
+  const { stats, workflow_step, workflow_progress: workflowProgress } = data
+  const currentWindowText = `Week ${data.current_window.week}, ${data.current_window.year} (${data.current_window.start} to ${data.current_window.end})`
 
   const steps = [
     { key: "uploaded", label: "Upload Observation Data" },
     { key: "aggregated", label: "Spatial Aggregation" },
     { key: "mapped", label: "Generate Map" },
     { key: "generated", label: "Generate Report" },
+    { key: "completed", label: "Complete" },
   ] as const
 
   const activeIndex =
@@ -108,6 +110,26 @@ export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
           <h2 className="text-lg font-semibold mb-4">
             Report Generation Process
           </h2>
+          <p className="text-sm text-muted-foreground mb-4">
+            Tracking current reporting period: {currentWindowText}
+          </p>
+          {workflowProgress && (
+            <div className="mb-4 rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm">
+              <span className="font-medium capitalize">Latest: </span>
+              <span>{workflowProgress.message}</span>
+              <span
+                className={`ml-2 rounded px-2 py-0.5 text-xs font-semibold ${
+                  workflowProgress.status === "error"
+                    ? "bg-red-100 text-red-700"
+                    : workflowProgress.status === "success"
+                      ? "bg-green-100 text-green-700"
+                      : "bg-blue-100 text-blue-700"
+                }`}
+              >
+                {workflowProgress.status}
+              </span>
+            </div>
+          )}
 
           {/* Progress */}
           <div className="mb-4">

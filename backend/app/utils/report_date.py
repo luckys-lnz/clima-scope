@@ -58,30 +58,18 @@ def get_weekly_report_window_from_monday(monday: datetime) -> WeeklyReportWindow
 
 def get_current_weekly_report_window(today: Optional[datetime] = None) -> WeeklyReportWindow:
     """
-    Get the weekly report window for the FORECAST PERIOD
-    Forecast runs Tuesday → next Monday
-    Week number is based on the START of forecast (Tuesday)
+    Get the weekly report window for the CURRENT reporting period.
+    Window runs Tuesday -> next Monday anchored to the Monday of current week.
     """
     if today is None:
         today = datetime.now()
     
     today = today.replace(hour=0, minute=0, second=0, microsecond=0)
-    
-    # Find the upcoming Tuesday (forecast start)
-    days_to_tuesday = (1 - today.weekday()) % 7  # Tuesday = 1 in Python
-    if days_to_tuesday == 0:
-        days_to_tuesday = 7  # If today is Tuesday, forecast starts today
-    
-    forecast_start = today + timedelta(days=days_to_tuesday)
-    
-    # Forecast ends next Monday (6 days later)
-    forecast_end = forecast_start + timedelta(days=6)
-    
-    # Week number based on forecast start (Tuesday)
-    week = forecast_start.isocalendar()[1]
-    year = forecast_start.year
-    
-    return WeeklyReportWindow(forecast_start, forecast_end, week, year)
+
+    # Align with frontend logic: find Monday of current week first.
+    # Python weekday: Monday=0 ... Sunday=6
+    monday = today - timedelta(days=today.weekday())
+    return get_weekly_report_window_from_monday(monday)
 
 
 def format_weekly_report_window(window: WeeklyReportWindow) -> str:
