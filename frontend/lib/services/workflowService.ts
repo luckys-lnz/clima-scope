@@ -232,6 +232,12 @@ export const workflowService = {
     filename: string
     report_week: number
     report_year: number
+    stage_statuses?: Array<{
+      stage: string
+      status: string
+      message: string
+      timestamp: string
+    }>
   }> => {
     const response = await fetch(`${API_BASE}/api/v1/workflow/generate-report`, {
       method: "POST",
