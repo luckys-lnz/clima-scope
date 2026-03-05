@@ -1,7 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
+import { useState, useEffect, type ReactNode } from "react"
 import {
   BarChart3,
   FileText,
@@ -24,8 +23,8 @@ import { authService } from "@/lib/services/authService"
 type Screen = "dashboard" | "generate" | "archive" | "config" | "upload"
 
 export default function Dashboard() {
-  const router = useRouter()
   const [currentScreen, setCurrentScreen] = useState<Screen>("dashboard")
+  const [visitedScreens, setVisitedScreens] = useState<Screen[]>(["dashboard"])
   const [selectedCounty, setSelectedCounty] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [isLoggingOut, setIsLoggingOut] = useState(false)
@@ -64,41 +63,20 @@ export default function Dashboard() {
     { id: "config", label: "Settings", icon: Settings },
   ]
 
-  const renderScreen = () => {
-    switch (currentScreen) {
-      case "dashboard":
-        return (
-          <DashboardOverview
-            onNavigate={(screen: string) =>
-              setCurrentScreen(screen as Screen)
-            }
-          />
-        )
-      case "generate":
-        return <ManualGeneration onBack={() => setCurrentScreen("dashboard")} />
-      case "archive":
-        return (
-          <ReportArchive
-            onSelectCounty={(county) => {
-              setSelectedCounty(county)
-            }}
-          />
-        )
-      case "config":
-        return (
-          <SystemConfiguration onBack={() => setCurrentScreen("dashboard")} />
-        )
-      case "upload":
-        return <DataUpload onBack={() => setCurrentScreen("dashboard")} />
-      default:
-        return (
-          <DashboardOverview
-            onNavigate={(screen: string) =>
-              setCurrentScreen(screen as Screen)
-            }
-          />
-        )
-    }
+  const navigateTo = (screen: Screen) => {
+    setCurrentScreen(screen)
+    setVisitedScreens((prev) =>
+      prev.includes(screen) ? prev : [...prev, screen]
+    )
+  }
+
+  const renderPanel = (screen: Screen, node: ReactNode) => {
+    if (!visitedScreens.includes(screen)) return null
+    return (
+      <div className={currentScreen === screen ? "block" : "hidden"}>
+        {node}
+      </div>
+    )
   }
 
   const getTitle = (screen: string) => {
@@ -146,7 +124,7 @@ export default function Dashboard() {
               <button
                 key={item.id}
                 onClick={() => {
-                  setCurrentScreen(item.id as Screen)
+                  navigateTo(item.id as Screen)
                   setSidebarOpen(false)
                 }}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-sm font-medium ${
@@ -217,7 +195,32 @@ export default function Dashboard() {
 
         {/* Content */}
         <div className="flex-1 overflow-auto">
-          <div className="min-h-full">{renderScreen()}</div>
+          <div className="min-h-full">
+            {renderPanel(
+              "dashboard",
+              <DashboardOverview onNavigate={(screen: string) => navigateTo(screen as Screen)} />
+            )}
+            {renderPanel(
+              "generate",
+              <ManualGeneration onBack={() => navigateTo("dashboard")} />
+            )}
+            {renderPanel(
+              "archive",
+              <ReportArchive
+                onSelectCounty={(county) => {
+                  setSelectedCounty(county)
+                }}
+              />
+            )}
+            {renderPanel(
+              "config",
+              <SystemConfiguration onBack={() => navigateTo("dashboard")} />
+            )}
+            {renderPanel(
+              "upload",
+              <DataUpload onBack={() => navigateTo("dashboard")} />
+            )}
+          </div>
         </div>
       </main>
     </div>

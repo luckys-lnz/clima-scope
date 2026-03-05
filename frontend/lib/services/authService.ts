@@ -129,27 +129,35 @@ export const authService = {
       throw new Error("Failed to get user")
     }
 
-    return response.json()
+    const user = await response.json()
+    localStorage.setItem("user", JSON.stringify(user))
+    return user
   },
 
   // -----------------------
   // GET SESSION FROM LOCALSTORAGE
   // -----------------------
   getSession: async (): Promise<Session | null> => {
-    const access_token = localStorage.getItem("access_token")
-    const refresh_token = localStorage.getItem("refresh_token")  // ← ADD THIS
+    let access_token = localStorage.getItem("access_token")
+    let refresh_token = localStorage.getItem("refresh_token")
     const userStr = localStorage.getItem("user")
     
-    if (!access_token || !refresh_token || !userStr) {  // ← UPDATE CONDITION
+    if (!access_token || !refresh_token || !userStr) {
       return null
     }
 
     try {
+      if (authService.isTokenExpired(access_token)) {
+        const refreshed = await authService.refreshToken(refresh_token)
+        access_token = refreshed.access_token
+        refresh_token = refreshed.refresh_token
+      }
+
       const user = JSON.parse(userStr) as User
       return {
         user,
         access_token,
-        refresh_token  // ← ADD THIS
+        refresh_token
       }
     } catch {
       return null
@@ -166,5 +174,24 @@ export const authService = {
     } catch {
       return true
     }
+  },
+
+  getValidAccessToken: async (token?: string | null): Promise<string> => {
+    const accessToken = token || localStorage.getItem("access_token")
+    if (!accessToken) {
+      throw new Error("No active session")
+    }
+
+    if (!authService.isTokenExpired(accessToken)) {
+      return accessToken
+    }
+
+    const refreshToken = localStorage.getItem("refresh_token")
+    if (!refreshToken) {
+      throw new Error("Session expired. Please sign in again.")
+    }
+
+    const refreshed = await authService.refreshToken(refreshToken)
+    return refreshed.access_token
   }
 }

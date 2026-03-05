@@ -12,6 +12,7 @@ interface Template {
   file_name: string
   file_type: string
   upload_date: string
+  file_path?: string | null
   is_default?: boolean
 }
 
@@ -20,16 +21,19 @@ interface SystemConfigurationProps {
 }
 
 const STORAGE_KEY = "system_settings_cache"
+const STORAGE_VERSION = 2
 
 export function SystemConfiguration({ onBack }: SystemConfigurationProps) {
-  const { token, isLoading: authLoading } = useAuth()
+  const { access_token: token, isLoading: authLoading } = useAuth()
 
   // Load from cache immediately
   const getCachedData = () => {
     if (typeof window === "undefined") return null
     try {
       const cached = sessionStorage.getItem(STORAGE_KEY)
-      return cached ? JSON.parse(cached) : null
+      const parsed = cached ? JSON.parse(cached) : null
+      if (!parsed || parsed.version !== STORAGE_VERSION) return null
+      return parsed
     } catch {
       return null
     }
@@ -45,15 +49,23 @@ export function SystemConfiguration({ onBack }: SystemConfigurationProps) {
   const [templates, setTemplates] = useState<Template[]>(cached?.templates || [])
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(cached?.selectedTemplateId || null)
 
-  // Fetch only if no cache
+  // Always fetch fresh settings when page opens; cache is only an initial placeholder.
   useEffect(() => {
-    if (cached || authLoading || !token) return
+    if (!authLoading && !token) {
+      setLoading(false)
+      setError("Session expired. Please sign in again.")
+      return
+    }
+
+    if (authLoading || !token) return
 
     const fetchSettings = async () => {
       try {
+        setLoading(true)
         const data = await SettingsService.getSettings(token)
 
         const settingsData = {
+          version: STORAGE_VERSION,
           shapefilePath: data.shapefile_path || "",
           templates: data.templates || [],
           selectedTemplateId: data.user_settings?.pdf_template_id || null,
@@ -72,7 +84,7 @@ export function SystemConfiguration({ onBack }: SystemConfigurationProps) {
     }
 
     fetchSettings()
-  }, [token, authLoading, cached])
+  }, [token, authLoading])
 
   const handleTemplateChange = async (templateId: string) => {
     if (!token) return
@@ -83,7 +95,12 @@ export function SystemConfiguration({ onBack }: SystemConfigurationProps) {
 
       setSelectedTemplateId(templateId)
 
-      const updatedCache = { shapefilePath, templates, selectedTemplateId: templateId }
+      const updatedCache = {
+        version: STORAGE_VERSION,
+        shapefilePath,
+        templates,
+        selectedTemplateId: templateId,
+      }
       sessionStorage.setItem(STORAGE_KEY, JSON.stringify(updatedCache))
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save settings")
@@ -96,7 +113,6 @@ export function SystemConfiguration({ onBack }: SystemConfigurationProps) {
     value: t.id,
     label: t.is_default ? `${t.file_name} (Default)` : t.file_name,
   }))
-
   if (loading || authLoading) {
     return (
       <div className="p-8 max-w-3xl">

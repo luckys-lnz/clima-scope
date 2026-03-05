@@ -12,23 +12,29 @@ import { SecondaryButton } from "@/components/ui/secondary-button"
 import { UsageRow } from "@/components/ui/usage-row"
 import { StatCard } from "@/components/stat-card"
 import { formatRelativeDate } from "@/lib/utils/date"
+import { useAuth } from "@/hooks/useAuth"
 
 interface DashboardOverviewProps {
   onNavigate: (screen: string) => void
 }
 
 export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
+  const { access_token: token, isLoading: authLoading } = useAuth()
   const [data, setData] = useState<DashboardOverviewData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    if (authLoading) return
+    if (!token) {
+      setError("Session expired. Please sign in again.")
+      setLoading(false)
+      return
+    }
+
     async function fetchDashboard() {
       try {
         setLoading(true)
-
-        const token = localStorage.getItem("access_token")
-        if (!token) throw new Error("No token")
 
         const result = await DashboardService.getOverview(token)
         setData(result)
@@ -40,7 +46,7 @@ export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
     }
 
     fetchDashboard()
-  }, [])
+  }, [token, authLoading])
 
   if (loading) return <div className="p-6">Loading dashboard…</div>
   if (error || !data) return <div className="p-6 text-red-500">{error || "No data"}</div>

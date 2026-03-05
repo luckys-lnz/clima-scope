@@ -6,6 +6,7 @@ from typing import Optional
 from app.schemas.auth import (
     SignupRequest,
     LoginRequest,
+    RefreshTokenRequest,
     AuthResponse,
     UserResponse,
     ProfileUpdateRequest,
@@ -212,11 +213,15 @@ async def update_profile(updates: ProfileUpdateRequest, user=Depends(get_current
 # REFRESH TOKEN
 # -----------------------------
 @router.post("/refresh")
-async def refresh_token(refresh_token: str = Form(...)):
+async def refresh_token(payload: Optional[RefreshTokenRequest] = None, refresh_token: Optional[str] = Form(None)):
     supabase = get_supabase_anon()
     
     try:
-        result = supabase.auth.refresh_session(refresh_token)
+        token = payload.refresh_token if payload and payload.refresh_token else refresh_token
+        if not token:
+            raise HTTPException(status_code=400, detail="refresh_token is required")
+
+        result = supabase.auth.refresh_session(token)
         return {
             "access_token": result.session.access_token,
             "refresh_token": result.session.refresh_token,

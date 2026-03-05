@@ -15,14 +15,15 @@ export function isTokenExpired(token: string): boolean {
   }
   
   // Handle token expiration
-  export function handleTokenExpired(): never {
-    // Clear storage
+export function handleTokenExpired(): never {
+  // Clear storage
     localStorage.removeItem("access_token")
+    localStorage.removeItem("refresh_token")
     localStorage.removeItem("user")
     
     // Redirect to login page if in browser
     if (typeof window !== "undefined") {
-      window.location.href = "/login"
+      window.location.href = "/sign-in"
     }
     
     throw new Error("Session expired. Please login again.")
