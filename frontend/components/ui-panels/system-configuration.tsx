@@ -61,7 +61,8 @@ export function SystemConfiguration({ onBack }: SystemConfigurationProps) {
 
     const fetchSettings = async () => {
       try {
-        setLoading(true)
+        // Keep UI seamless when cache exists; refresh in background.
+        if (!cached) setLoading(true)
         const data = await SettingsService.getSettings(token)
 
         const settingsData = {
@@ -76,11 +77,17 @@ export function SystemConfiguration({ onBack }: SystemConfigurationProps) {
         setShapefilePath(settingsData.shapefilePath)
         setTemplates(settingsData.templates)
         setSelectedTemplateId(settingsData.selectedTemplateId)
-        setLoading(false)
+        if (!cached) setLoading(false)
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load settings")
-        setLoading(false)
+        if (!cached) {
+          setError(err instanceof Error ? err.message : "Failed to load settings")
+          setLoading(false)
+        }
       }
+    }
+
+    if (cached) {
+      setLoading(false)
     }
 
     fetchSettings()

@@ -20,6 +20,9 @@ export function handleTokenExpired(): never {
     localStorage.removeItem("access_token")
     localStorage.removeItem("refresh_token")
     localStorage.removeItem("user")
+    sessionStorage.removeItem("dashboard_overview_cache_v1")
+    sessionStorage.removeItem("report_archive_cache_v1")
+    sessionStorage.removeItem("system_settings_cache")
     
     // Redirect to login page if in browser
     if (typeof window !== "undefined") {
