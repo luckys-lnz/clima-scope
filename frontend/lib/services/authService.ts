@@ -8,6 +8,9 @@ import type {
 } from "@/lib/models/auth"
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+const DASHBOARD_CACHE_KEY = "dashboard_overview_cache_v1"
+const REPORTS_CACHE_KEY = "report_archive_cache_v1"
+const SETTINGS_CACHE_KEY = "system_settings_cache"
 
 export interface LoginResponse {
   user: User
@@ -48,6 +51,9 @@ export const authService = {
     localStorage.setItem("access_token", result.access_token)
     localStorage.setItem("refresh_token", result.refresh_token)  // ← ADD THIS
     localStorage.setItem("user", JSON.stringify(result.user))
+    sessionStorage.removeItem(DASHBOARD_CACHE_KEY)
+    sessionStorage.removeItem(REPORTS_CACHE_KEY)
+    sessionStorage.removeItem(SETTINGS_CACHE_KEY)
 
     return result
   },
@@ -113,6 +119,9 @@ export const authService = {
     localStorage.removeItem("access_token")
     localStorage.removeItem("refresh_token")  // ← ADD THIS
     localStorage.removeItem("user")
+    sessionStorage.removeItem(DASHBOARD_CACHE_KEY)
+    sessionStorage.removeItem(REPORTS_CACHE_KEY)
+    sessionStorage.removeItem(SETTINGS_CACHE_KEY)
   },
 
   // -----------------------

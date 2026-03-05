@@ -18,10 +18,22 @@ interface DashboardOverviewProps {
   onNavigate: (screen: string) => void
 }
 
+const DASHBOARD_CACHE_KEY = "dashboard_overview_cache_v1"
+
 export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
+  const getCachedData = (): DashboardOverviewData | null => {
+    if (typeof window === "undefined") return null
+    try {
+      const raw = sessionStorage.getItem(DASHBOARD_CACHE_KEY)
+      return raw ? (JSON.parse(raw) as DashboardOverviewData) : null
+    } catch {
+      return null
+    }
+  }
+
   const { access_token: token, isLoading: authLoading } = useAuth()
-  const [data, setData] = useState<DashboardOverviewData | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [data, setData] = useState<DashboardOverviewData | null>(() => getCachedData())
+  const [loading, setLoading] = useState(() => !getCachedData())
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -34,15 +46,23 @@ export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
 
     async function fetchDashboard() {
       try {
-        setLoading(true)
+        // Only show blocking loader if we have no cached data.
+        if (!data) setLoading(true)
 
         const result = await DashboardService.getOverview(token)
         setData(result)
+        sessionStorage.setItem(DASHBOARD_CACHE_KEY, JSON.stringify(result))
       } catch (e: any) {
-        setError(e.message || "Error")
+        if (!data) {
+          setError(e.message || "Error")
+        }
       } finally {
-        setLoading(false)
+        if (!data) setLoading(false)
       }
+    }
+
+    if (data) {
+      setLoading(false)
     }
 
     fetchDashboard()

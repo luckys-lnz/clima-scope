@@ -4,25 +4,31 @@ export interface WeeklyReportWindow {
     week: number
     year: number
   }
+
+export interface ISOWeekInfo {
+  week: number
+  year: number
+}
   
   /**
    * ISO week number
    * Monday-based week (ISO-8601)
    */
-  export function getISOWeek(date: Date): number {
-    const tmp = new Date(date.getTime())
-    tmp.setHours(0, 0, 0, 0)
-  
-    // Thursday in current week decides the year
-    tmp.setDate(tmp.getDate() + 3 - ((tmp.getDay() + 6) % 7))
-  
-    const week1 = new Date(tmp.getFullYear(), 0, 4)
-    return (
-      1 +
-      Math.round(
-        ((tmp.getTime() - week1.getTime()) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) / 7
-      )
-    )
+export function getISOWeek(date: Date): number {
+    return getISOWeekInfo(date).week
+  }
+
+  /**
+   * ISO week + ISO year
+   */
+  export function getISOWeekInfo(date: Date): ISOWeekInfo {
+    const tmp = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
+    const day = tmp.getUTCDay() || 7 // Sunday => 7
+    tmp.setUTCDate(tmp.getUTCDate() + 4 - day) // Thursday of this ISO week
+    const isoYear = tmp.getUTCFullYear()
+    const yearStart = new Date(Date.UTC(isoYear, 0, 1))
+    const week = Math.ceil((((tmp.getTime() - yearStart.getTime()) / 86400000) + 1) / 7)
+    return { week, year: isoYear }
   }
   
   /**
@@ -36,8 +42,9 @@ export interface WeeklyReportWindow {
     const end = new Date(monday)
     end.setDate(monday.getDate() + 7) // next Monday
   
-    const week = getISOWeek(monday) // ISO week based on Monday
-    const year = monday.getFullYear()
+    const iso = getISOWeekInfo(monday)
+    const week = iso.week
+    const year = iso.year
   
     return { start, end, week, year }
   }

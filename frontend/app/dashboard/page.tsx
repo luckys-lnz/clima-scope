@@ -19,6 +19,7 @@ import { ReportArchive } from "@/components/ui-panels/report-archive"
 import { SystemConfiguration } from "@/components/ui-panels/system-configuration"
 import { DataUpload } from "@/components/data-upload"
 import { authService } from "@/lib/services/authService"
+import { bootstrapService } from "@/lib/services/bootstrapService"
 
 type Screen = "dashboard" | "generate" | "archive" | "config" | "upload"
 
@@ -39,6 +40,9 @@ export default function Dashboard() {
           username: session.user.full_name || "Unknown",
           county: session.user.county || "Unknown",
         })
+
+        // Warm critical panels in background without blocking navigation.
+        void bootstrapService.primeDashboardData(session.access_token)
       }
     })
   }, [])

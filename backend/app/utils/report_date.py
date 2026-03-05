@@ -13,33 +13,8 @@ def get_iso_week(date: datetime) -> int:
     """
     ISO week number
     Monday-based week (ISO-8601)
-    Matches frontend getISOWeek() exactly
     """
-    # Create a copy and set to midnight
-    tmp = date.replace(hour=0, minute=0, second=0, microsecond=0)
-    
-    # JavaScript: tmp.setDate(tmp.getDate() + 3 - ((tmp.getDay() + 6) % 7))
-    # Convert Python weekday (0=Monday, 6=Sunday) to JS weekday (0=Sunday, 6=Saturday)
-    js_day = (tmp.weekday() + 1) % 7  # Now 0=Sunday, 1=Monday, ..., 6=Saturday
-    
-    # Thursday in current week decides the year
-    days_to_thursday = 3 - ((js_day + 6) % 7)
-    thursday = tmp + timedelta(days=days_to_thursday)
-    
-    # Week 1 contains January 4th
-    week1 = datetime(thursday.year, 1, 4)
-    week1 = week1.replace(hour=0, minute=0, second=0, microsecond=0)
-    
-    # Calculate days difference
-    days_diff = (thursday - week1).days
-    
-    # JavaScript: ((week1.getDay() + 6) % 7)
-    week1_js_day = (week1.weekday() + 1) % 7
-    
-    # Final calculation
-    week_num = 1 + round((days_diff - 3 + week1_js_day) / 7)
-    
-    return week_num
+    return date.isocalendar().week
 
 
 def get_weekly_report_window_from_monday(monday: datetime) -> WeeklyReportWindow:
@@ -50,8 +25,9 @@ def get_weekly_report_window_from_monday(monday: datetime) -> WeeklyReportWindow
     start = monday + timedelta(days=1)  # Tuesday
     end = monday + timedelta(days=7)    # next Monday
     
-    week = get_iso_week(monday)  # ISO week based on Monday
-    year = monday.year
+    iso = monday.isocalendar()
+    week = iso.week
+    year = iso.year
     
     return WeeklyReportWindow(start, end, week, year)
 

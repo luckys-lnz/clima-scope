@@ -14,11 +14,23 @@ interface ReportArchiveProps {
   onSelectCounty: (county: string) => void
 }
 
+const REPORTS_CACHE_KEY = "report_archive_cache_v1"
+
 export function ReportArchive({ onSelectCounty }: ReportArchiveProps) {
+  const getCachedReports = (): ReportArchiveItem[] | null => {
+    if (typeof window === "undefined") return null
+    try {
+      const raw = sessionStorage.getItem(REPORTS_CACHE_KEY)
+      return raw ? (JSON.parse(raw) as ReportArchiveItem[]) : null
+    } catch {
+      return null
+    }
+  }
+
   const { access_token: token, isLoading: authLoading } = useAuth()
 
-  const [reports, setReports] = useState<ReportArchiveItem[]>([])
-  const [loading, setLoading] = useState(true)
+  const [reports, setReports] = useState<ReportArchiveItem[]>(() => getCachedReports() || [])
+  const [loading, setLoading] = useState(() => !getCachedReports())
 
   const [filterCounty, setFilterCounty] = useState("")
   const [filterStatus, setFilterStatus] = useState("")
@@ -34,14 +46,20 @@ export function ReportArchive({ onSelectCounty }: ReportArchiveProps) {
 
     const loadReports = async () => {
       try {
-        setLoading(true)
+        // Only show blocking loader if cache is empty.
+        if (reports.length === 0) setLoading(true)
         const data = await ReportService.getReports(token)
         setReports(data)
+        sessionStorage.setItem(REPORTS_CACHE_KEY, JSON.stringify(data))
       } catch {
-        setReports([])
+        if (reports.length === 0) setReports([])
       } finally {
-        setLoading(false)
+        if (reports.length === 0) setLoading(false)
       }
+    }
+
+    if (reports.length > 0) {
+      setLoading(false)
     }
 
     loadReports()

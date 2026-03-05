@@ -36,8 +36,7 @@ export default function SignIn() {
 
       setSuccess("Login successful! Redirecting...")
       setFormData({ email: "", password: "" })
-
-      setTimeout(() => router.push("/dashboard"), 1000)
+      router.push("/dashboard")
     } catch (err: any) {
       console.error("Login error:", err)
       setFormData(prev => ({ ...prev, password: "" }))
