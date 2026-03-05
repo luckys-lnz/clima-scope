@@ -155,7 +155,7 @@ class DetailedValidationResponse(ValidationResponse):
 # ============================================
 
 
-class ReportGenerationRequ]est(BaseModel):
+class ReportGenerationRequest(BaseModel):
     """Request payload for generating the final weekly PDF report."""
 
     county_name: str
@@ -173,3 +173,4 @@ class ReportGenerationResponse(BaseModel):
     filename: str
     report_week: int
     report_year: int
+    stage_statuses: List[Dict[str, str]] = Field(default_factory=list)

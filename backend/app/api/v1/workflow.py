@@ -20,6 +20,10 @@ from app.schemas.workflow import (
 from app.core.config import settings
 from app.utils.map_generator import create_weather_map
 from app.utils.report_generator import generate_weekly_forecast_pdf
+from app.services.narration_service import (
+    generate_report_narration,
+    summarize_observation_data,
+)
 
 router = APIRouter(tags=["Workflow"])
 logger = logging.getLogger(__name__)
@@ -639,9 +643,11 @@ async def generate_report(
     """
     Step 4: Generate the final weekly PDF report and store it in Supabase.
 
-    This implementation uses a minimal structured payload to drive the
-    `generate_weekly_forecast_pdf` helper, so that manual generation
-    completes end-to-end even before full AI narration is wired in.
+    Step 4 workflow:
+    1) Gather latest observation file for the selected report window
+    2) Gather generated maps for the same window
+    3) Generate AI narration from those inputs
+    4) Build the PDF with existing helper and store it in Supabase
     """
     print("\n" + "=" * 60)
     print("📄 REPORT GENERATION STARTED")
@@ -657,8 +663,160 @@ async def generate_report(
         f"Period: {request.report_start_at} to {request.report_end_at}"
     )
 
+    stage_statuses = []
+
+    def add_stage(stage: str, status: str, message: str):
+        stage_statuses.append(
+            {
+                "stage": stage,
+                "status": status,
+                "message": message,
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+            }
+        )
+
+    add_stage("report_generation", "in_progress", "Step 4 started")
+
     # ------------------------------------------------------------------
-    # 1. Build minimal structured data + narration for the PDF helper
+    # 1. Gather observation + map context for AI narration
+    # ------------------------------------------------------------------
+    try:
+        add_stage(
+            "observation_context",
+            "in_progress",
+            "Loading observation file for selected report window",
+        )
+        upload = (
+            supabase_admin.table("uploads")
+            .select("file_name,file_path")
+            .eq("user_id", user_id)
+            .eq("file_type", "observations")
+            .eq("report_week", request.week_number)
+            .eq("report_year", request.year)
+            .order("uploaded_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if not upload.data:
+            add_stage(
+                "observation_context",
+                "failed",
+                "No observation file found for selected window",
+            )
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"No observation file found for week {request.week_number}, "
+                    f"{request.year}. Generate maps/validate for this window first."
+                ),
+            )
+
+        obs = upload.data[0]
+        observation_bytes = supabase_admin.storage.from_(BUCKET_NAME).download(
+            obs["file_path"]
+        )
+        observation_summary = summarize_observation_data(
+            csv_bytes=observation_bytes,
+            requested_variables=request.variables,
+        )
+        add_stage(
+            "observation_context",
+            "completed",
+            f"Observation data prepared from {obs['file_name']}",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Failed to prepare observation context: {e}")
+        add_stage(
+            "observation_context",
+            "failed",
+            "Failed to read observation data",
+        )
+        raise HTTPException(status_code=500, detail="Failed to read observation data")
+
+    try:
+        add_stage(
+            "map_context",
+            "in_progress",
+            "Loading generated maps for selected variables",
+        )
+        maps_response = (
+            supabase_admin.table("generated_maps")
+            .select("variable,map_url,storage_path,created_at")
+            .eq("user_id", user_id)
+            .eq("report_week", request.week_number)
+            .eq("report_year", request.year)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        rows = maps_response.data or []
+
+        latest_maps_by_var = {}
+        for row in rows:
+            variable = row.get("variable")
+            if variable and variable not in latest_maps_by_var:
+                latest_maps_by_var[variable] = row
+
+        map_context = []
+        for variable in request.variables:
+            row = latest_maps_by_var.get(variable)
+            if row:
+                map_context.append(
+                    {
+                        "variable": variable,
+                        "map_url": row.get("map_url", ""),
+                        "storage_path": row.get("storage_path", ""),
+                    }
+                )
+        add_stage(
+            "map_context",
+            "completed",
+            f"Map context prepared for {len(map_context)} variable(s)",
+        )
+    except Exception as e:
+        print(f"⚠️ Failed to fetch generated maps context: {e}")
+        map_context = []
+        add_stage(
+            "map_context",
+            "failed",
+            "Failed to load map context; continuing without map metadata",
+        )
+
+    # ------------------------------------------------------------------
+    # 2. Generate AI narration from maps + observation summary
+    # ------------------------------------------------------------------
+    add_stage(
+        "ai_narration",
+        "in_progress",
+        "Generating weekly narration from observation and map context",
+    )
+    narration = await generate_report_narration(
+        county_name=request.county_name,
+        week_number=request.week_number,
+        year=request.year,
+        report_start_at=request.report_start_at,
+        report_end_at=request.report_end_at,
+        selected_variables=request.variables,
+        observation_summary=observation_summary,
+        map_context=map_context,
+    )
+    narration_source = narration.get("source", "unknown")
+    if narration_source == "fallback":
+        add_stage(
+            "ai_narration",
+            "completed",
+            "AI narration unavailable; fallback narration applied",
+        )
+    else:
+        add_stage(
+            "ai_narration",
+            "completed",
+            f"AI narration generated via {narration_source}",
+        )
+
+    # ------------------------------------------------------------------
+    # 3. Build structured data payload for the PDF helper
     # ------------------------------------------------------------------
     issue_date = datetime.utcnow().strftime("%Y-%m-%d")
     period_str = f"{request.report_start_at} to {request.report_end_at}"
@@ -702,24 +860,11 @@ async def generate_report(
         },
     }
 
-    narration = {
-        "weekly_summary_text": (
-            f"This is an automatically generated weekly weather summary for "
-            f"{request.county_name} for the period {period_str}. "
-            "Detailed narratives are not yet available, but the report "
-            "includes the selected variables and reference information."
-        ),
-        "marine_summary_text": (
-            "Marine weather details are not yet synthesized for this report. "
-            "Please consult official marine forecasts where applicable."
-        ),
-    }
-
     # Map image is optional – we can leave this out for now
     map_path = None
 
     # ------------------------------------------------------------------
-    # 2. Generate PDF to a temporary file
+    # 4. Generate PDF to a temporary file
     # ------------------------------------------------------------------
     filename = (
         f"{request.county_name.replace(' ', '_').lower()}_week_"
@@ -730,6 +875,7 @@ async def generate_report(
     output_path = os.path.join(temp_dir, filename)
 
     try:
+        add_stage("pdf_generation", "in_progress", "Generating PDF document")
         print(f"📝 Generating PDF at: {output_path}")
         generate_weekly_forecast_pdf(
             data=data,
@@ -738,14 +884,17 @@ async def generate_report(
             output_path=output_path,
         )
         print("✅ PDF generation complete")
+        add_stage("pdf_generation", "completed", "PDF document generated")
     except Exception as e:
         print(f"❌ Failed to generate PDF: {e}")
+        add_stage("pdf_generation", "failed", "Failed to generate report PDF")
         raise HTTPException(status_code=500, detail="Failed to generate report PDF")
 
     # ------------------------------------------------------------------
-    # 3. Upload PDF to Supabase Storage and create DB record
+    # 5. Upload PDF to Supabase Storage and create DB record
     # ------------------------------------------------------------------
     try:
+        add_stage("storage_upload", "in_progress", "Uploading generated PDF to storage")
         with open(output_path, "rb") as f:
             pdf_bytes = f.read()
 
@@ -791,9 +940,19 @@ async def generate_report(
         pdf_url = f"/api/v1/reports/download/{report_id}"
 
         print("✅ Report record created")
+        add_stage(
+            "storage_upload",
+            "completed",
+            "PDF uploaded and report record created",
+        )
 
     except Exception as e:
         print(f"❌ Failed to upload or save report record: {e}")
+        add_stage(
+            "storage_upload",
+            "failed",
+            "Failed to store generated report",
+        )
         raise HTTPException(status_code=500, detail="Failed to store generated report")
     finally:
         # Clean up temp directory
@@ -809,10 +968,12 @@ async def generate_report(
     print("\n" + "=" * 60)
     print("✅ REPORT GENERATION COMPLETE")
     print("=" * 60 + "\n")
+    add_stage("report_generation", "completed", "Step 4 completed successfully")
 
     return ReportGenerationResponse(
         pdf_url=pdf_url,
         filename=filename,
         report_week=request.week_number,
         report_year=request.year,
+        stage_statuses=stage_statuses,
     )
