@@ -7,13 +7,21 @@ Application settings and environment variables.
 import os
 import json
 from pathlib import Path
-from typing import List, ClassVar
-from pydantic_settings import BaseSettings
-from pydantic import Field
+from typing import Any, List, ClassVar
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, field_validator
 
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 class Settings(BaseSettings):
     """Application settings."""
+
+    model_config = SettingsConfigDict(
+        env_file=(str(BACKEND_ROOT / ".env"), str(PROJECT_ROOT / ".env")),
+        env_file_encoding="utf-8",
+        case_sensitive=True,
+    )
     
     # Application
     APP_NAME: str = "Clima-scope API"
@@ -25,9 +33,48 @@ class Settings(BaseSettings):
     
     # CORS
     CORS_ORIGINS: str = Field(
-        default="http://localhost:3000,http://localhost:3001",
+        default="http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001",
         env="CORS_ORIGINS"
     )
+
+    @field_validator("DEBUG", mode="before")
+    @classmethod
+    def parse_debug_value(cls, value: Any) -> bool:
+        """Accept common string values (e.g. 'release') for DEBUG."""
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return False
+        if isinstance(value, (int, float)):
+            return bool(value)
+
+        text = str(value).strip().lower()
+        if text in {"1", "true", "yes", "on", "debug", "development", "dev"}:
+            return True
+        if text in {"0", "false", "no", "off", "release", "production", "prod", ""}:
+            return False
+
+        raise ValueError("DEBUG must be a boolean-like value.")
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, value: Any) -> str:
+        """Support comma-separated or JSON-array CORS origins."""
+        if isinstance(value, (list, tuple)):
+            return ",".join(str(origin).strip() for origin in value if str(origin).strip())
+
+        if isinstance(value, str):
+            raw = value.strip()
+            if raw.startswith("[") and raw.endswith("]"):
+                try:
+                    parsed = json.loads(raw)
+                    if isinstance(parsed, list):
+                        return ",".join(str(origin).strip() for origin in parsed if str(origin).strip())
+                except json.JSONDecodeError:
+                    pass
+            return raw
+
+        return str(value)
     
     @property
     def cors_origins_list(self) -> List[str]:
@@ -94,12 +141,6 @@ class Settings(BaseSettings):
     # Logging
     LOG_LEVEL: str = Field(default="INFO", env="LOG_LEVEL")
     
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = True
-
-
 # Create settings instance
 settings = Settings()
 
