@@ -8,6 +8,15 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
+# Resolve backend directory from script location so this script works from any cwd.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -d "$SCRIPT_DIR/app" ] && [ -f "$SCRIPT_DIR/requirements.txt" ]; then
+    BACKEND_DIR="$SCRIPT_DIR"
+else
+    BACKEND_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+fi
+cd "$BACKEND_DIR"
+
 echo -e "${GREEN}Clima-scope Backend API - Virtual Environment Setup${NC}"
 echo "================================================================"
 echo ""
@@ -84,7 +93,7 @@ pip install -r requirements.txt
 
 echo ""
 echo "Installing pdf_generator package..."
-PDF_GEN_PATH="../pdf_generator"
+PDF_GEN_PATH="$BACKEND_DIR/scripts/pdf_generator"
 
 if [ -d "$PDF_GEN_PATH" ] && [ -f "$PDF_GEN_PATH/setup.py" ]; then
     pip install -e "$PDF_GEN_PATH"

@@ -8,8 +8,8 @@ import {
   formatWeeklyReportWindow,
   getCurrentWeeklyReportWindow,
 } from "@/lib/utils/report_date"
-import { authService } from "@/lib/services/authService"
 import { workflowService } from "@/lib/services/workflowService"
+import { useAuth } from "@/hooks/useAuth"
 import type { ValidationResponse, MapOutput } from "@/lib/models/workflow"
 
 interface ManualGenerationProps {
@@ -32,7 +32,7 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
   const [isComplete, setIsComplete] = useState(false)
   const [downloadUrl, setDownloadUrl] = useState("")
   const [errorMessage, setErrorMessage] = useState("")
-  const [sessionToken, setSessionToken] = useState<string | null>(null)
+  const { access_token: sessionToken, user: authUser } = useAuth()
 
   const reportWindow = getCurrentWeeklyReportWindow()
 
@@ -41,15 +41,10 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
     return date.toISOString().split('T')[0] // "2026-03-23"
   }
 
-  // ===== SESSION =====
   useEffect(() => {
-    authService.getSession().then((session) => {
-      if (session?.user) {
-        setUserCounty(session.user.county || "")
-        setSessionToken(session.access_token)
-      }
-    })
-  }, [])
+    if (!authUser) return
+    setUserCounty(authUser.county || "")
+  }, [authUser])
 
   // ===== LOG HELPER =====
   const addLog = (msg: string) => {
@@ -57,6 +52,13 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
       ...prev,
       `[${new Date().toLocaleTimeString()}] ${msg}`,
     ])
+  }
+
+  const getErrorMessage = (error: unknown, fallback: string): string => {
+    if (error instanceof Error && error.message.trim().length > 0) {
+      return error.message
+    }
+    return fallback
   }
 
   // ===== STEP 1: VALIDATE DATA =====
@@ -96,8 +98,8 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
       addLog(`✓ Period dates: ${result.report_period.start} to ${result.report_period.end}`)
       addLog(`✓ File stats: ${result.row_count} rows, ${result.column_count} columns`)
       addLog("Stage 1 complete")
-    } catch (e: any) {
-      const errorMsg = e.message || "Validation failed"
+    } catch (error: unknown) {
+      const errorMsg = getErrorMessage(error, "Validation failed")
       addLog(`✗ Validation failed: ${errorMsg}`)
       setErrorMessage(errorMsg)
     } finally {
@@ -137,8 +139,8 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
 
       setStep(4)
       addLog("Stage 3 complete")
-    } catch (e: any) {
-      const errorMsg = e.message || "Map generation failed"
+    } catch (error: unknown) {
+      const errorMsg = getErrorMessage(error, "Map generation failed")
       addLog(`✗ Map generation failed: ${errorMsg}`)
       setErrorMessage(errorMsg)
     } finally {
@@ -183,8 +185,8 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
       addLog("Workflow complete")
 
       setIsComplete(true)
-    } catch (e: any) {
-      const errorMsg = e.message || "Report generation failed"
+    } catch (error: unknown) {
+      const errorMsg = getErrorMessage(error, "Report generation failed")
       addLog(`✗ Report generation failed: ${errorMsg}`)
       setErrorMessage(errorMsg)
     } finally {
