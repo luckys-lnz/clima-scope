@@ -187,7 +187,7 @@ export default function SignUp() {
   ].sort();
 
   return (
-    <div className="min-h-screen bg-background flex flex-col justify-center items-center px-4">
+    <div className="min-h-screen bg-background flex col justify-center items-center px-4">
       <div className="w-full max-w-md">
         {/* Header */}
         <div className="text-center mb-8">
@@ -211,13 +211,13 @@ export default function SignUp() {
         >
           {error && (
             <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 flex gap-3 items-start">
-              <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+              <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
               <p className="text-sm text-red-500">{error}</p>
             </div>
           )}
           {success && (
             <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/20 flex gap-3 items-start">
-              <CheckCircle className="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" />
+              <CheckCircle className="w-5 h-5 text-green-500 shrink-0 mt-0.5" />
               <div>
                 <p className="text-sm text-green-500 font-medium">{success}</p>
                 <p className="text-xs text-green-600 mt-1">
