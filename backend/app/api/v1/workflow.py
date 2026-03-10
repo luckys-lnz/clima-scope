@@ -1,9 +1,12 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 import pandas as pd
 import io
 import logging
 import os
 import tempfile
+import uuid
+import asyncio
+import hashlib
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
@@ -18,11 +21,19 @@ from app.schemas.workflow import (
     ReportGenerationResponse,
 )
 from app.core.config import settings
-from app.utils.map_generator import create_weather_map
+from app.utils.map_generator import create_weather_map, create_reliable_rainfall_map
 from app.utils.report_generator import generate_weekly_forecast_pdf
 from app.services.narration_service import (
     generate_report_narration,
     summarize_observation_data,
+)
+from app.services.open_meteo_service import (
+    fetch_daily_forecast,
+    centroid_from_rows,
+)
+from app.services.station_data_service import (
+    fetch_aggregated_station_csv_bytes,
+    get_three_month_window_from_previous_week,
 )
 
 router = APIRouter(tags=["Workflow"])
@@ -30,6 +41,505 @@ logger = logging.getLogger(__name__)
 
 # Get bucket name from settings
 BUCKET_NAME = settings.SUPABASE_STORAGE_BUCKET
+BACKGROUND_REPORT_TASKS: Dict[str, asyncio.Task] = {}
+
+
+def _resolve_column(columns, candidates):
+    lowered = {str(col).strip().lower(): str(col) for col in columns}
+    for candidate in candidates:
+        key = candidate.lower()
+        if key in lowered:
+            return lowered[key]
+    for candidate in candidates:
+        key = candidate.lower()
+        for lower_name, original in lowered.items():
+            if key in lower_name:
+                return original
+    return None
+
+
+def _format_wards_phrase(wards: List[str]) -> str:
+    cleaned = [str(w).strip() for w in wards if str(w).strip()]
+    if not cleaned:
+        return "N/A Ward"
+    if len(cleaned) == 1:
+        return f"{cleaned[0]} Ward"
+    if len(cleaned) == 2:
+        return f"{cleaned[0]} and {cleaned[1]} Ward"
+    return f"{', '.join(cleaned[:-1])} and {cleaned[-1]} Ward"
+
+
+def _load_subcounty_ward_map(
+    supabase_admin,
+    county_name: str,
+    bucket_name: str,
+) -> List[Dict[str, Any]]:
+    """
+    Build sub-county -> wards mapping from the uploaded shapefile components.
+    Returns a list of {"sub_county": str, "wards": List[str], "centroid": {"lat": float, "lon": float}}.
+    """
+    temp_shapefile_dir = None
+    try:
+        shapefile_records = (
+            supabase_admin.table("shared_files")
+            .select("file_name,file_path")
+            .in_("file_type", ["shapefile", "shapefiles"])
+            .execute()
+        )
+        components = shapefile_records.data or []
+        if not components:
+            return []
+
+        temp_shapefile_dir = tempfile.mkdtemp(prefix="report_shapefile_")
+        local_shapefile_path = None
+
+        for component in components:
+            file_name = component.get("file_name")
+            file_path = component.get("file_path")
+            if not file_name or not file_path:
+                continue
+            file_data = supabase_admin.storage.from_(bucket_name).download(file_path)
+            local_path = os.path.join(temp_shapefile_dir, file_name)
+            with open(local_path, "wb") as f:
+                f.write(file_data)
+            if file_name.lower().endswith(".shp"):
+                local_shapefile_path = local_path
+
+        if not local_shapefile_path:
+            return []
+
+        import geopandas as gpd
+
+        wards_gdf = gpd.read_file(local_shapefile_path)
+        county_col = _resolve_column(wards_gdf.columns, ["county", "county_name", "adm1_name"])
+        subcounty_col = _resolve_column(
+            wards_gdf.columns,
+            ["sub_county", "subcounty", "const", "constituency", "adm2_name"],
+        )
+        ward_col = _resolve_column(wards_gdf.columns, ["ward", "ward_name", "adm3_name", "name"])
+
+        if not county_col or not subcounty_col or not ward_col:
+            return []
+
+        county_rows = wards_gdf[
+            wards_gdf[county_col].astype(str).str.strip().str.lower() == county_name.strip().lower()
+        ].copy()
+        if county_rows.empty:
+            return []
+
+        mapping: Dict[str, set] = {}
+        centroids: Dict[str, Dict[str, float]] = {}
+        for _, row in county_rows.iterrows():
+            subcounty = str(row[subcounty_col]).strip()
+            ward = str(row[ward_col]).strip()
+            if not subcounty or not ward or subcounty.lower() == "nan" or ward.lower() == "nan":
+                continue
+            mapping.setdefault(subcounty, set()).add(ward)
+
+        for subcounty in mapping.keys():
+            sub_rows = county_rows[county_rows[subcounty_col].astype(str).str.strip() == subcounty]
+            if sub_rows.empty:
+                continue
+            geom = sub_rows.unary_union
+            if geom is None or geom.is_empty:
+                continue
+            centroid = geom.centroid
+            centroids[subcounty] = {"lat": float(centroid.y), "lon": float(centroid.x)}
+
+        result: List[Dict[str, Any]] = []
+        for subcounty in sorted(mapping.keys(), key=lambda x: x.lower()):
+            result.append(
+                {
+                    "sub_county": subcounty,
+                    "wards": sorted(mapping[subcounty], key=lambda x: x.lower()),
+                    "centroid": centroids.get(subcounty),
+                }
+            )
+        return result
+    except Exception as e:
+        print(f"⚠️ Failed to load sub-county/ward mapping from shapefile: {e}")
+        return []
+    finally:
+        if temp_shapefile_dir and os.path.exists(temp_shapefile_dir):
+            import shutil
+
+            shutil.rmtree(temp_shapefile_dir)
+
+
+def _deg_to_compass(value: Optional[float]) -> str:
+    if value is None:
+        return "Variable"
+    directions = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
+    idx = int((float(value) + 11.25) // 22.5) % 16
+    return directions[idx]
+
+
+def _weather_phrase_from_code(code: Optional[float], period: str) -> str:
+    if code is None:
+        return "N/A"
+    code_int = int(code)
+    if code_int in {0, 1}:
+        return "Sunny intervals" if period != "night" else "Clear night sky"
+    if code_int in {2, 3}:
+        return "Cloudy with sunny intervals" if period != "night" else "Partly cloudy night sky"
+    if code_int in {45, 48}:
+        return "Misty conditions"
+    if code_int in {51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82}:
+        return "Sunny intervals and light showers" if period != "night" else "Light showers possible"
+    if code_int in {71, 73, 75, 77, 85, 86}:
+        return "Cool with possible snowfall"
+    if code_int in {95, 96, 99}:
+        return "Showers with thunderstorms possible"
+    return "Cloudy with sunny intervals"
+
+
+def _build_rows_from_daily(
+    daily_payload: Dict[str, List],
+    report_dates: List[str],
+    day_labels: List[str],
+) -> Dict[str, Dict[str, str]]:
+    dates = [str(d) for d in (daily_payload.get("time", []) or [])]
+    index_by_date = {dt: idx for idx, dt in enumerate(dates)}
+
+    def _at(key: str, idx: int) -> Optional[float]:
+        arr = daily_payload.get(key, []) or []
+        if idx < 0 or idx >= len(arr):
+            return None
+        value = arr[idx]
+        return None if value is None else float(value)
+
+    rows: Dict[str, Dict[str, str]] = {}
+    for iso_date, label in zip(report_dates, day_labels):
+        idx = index_by_date.get(iso_date, -1)
+        code = _at("weather_code", idx)
+        rain = _at("precipitation_sum", idx)
+        pop = _at("precipitation_probability_max", idx)
+        tmax = _at("temperature_2m_max", idx)
+        tmin = _at("temperature_2m_min", idx)
+        wind = _at("wind_speed_10m_max", idx)
+        gust = _at("wind_gusts_10m_max", idx)
+        wind_dir = _at("wind_direction_10m_dominant", idx)
+
+        if rain is None:
+            rain_text = "N/A"
+        elif pop is None:
+            rain_text = f"{rain:.1f} mm"
+        elif pop < 35:
+            rain_text = "Showers possible over few places"
+        elif pop < 70:
+            rain_text = "Showers expected over several places"
+        else:
+            rain_text = "Showers expected over most places"
+
+        if wind is None and gust is None:
+            wind_text = "N/A"
+        else:
+            wind_kts = int(round((wind or 0) * 0.539957))
+            gust_kts = int(round((gust or wind or 0) * 0.539957))
+            low_kts = min(wind_kts, gust_kts)
+            high_kts = max(wind_kts, gust_kts)
+            wind_text = f"{_deg_to_compass(wind_dir)} winds {low_kts}-{high_kts} knots"
+
+        rows[label] = {
+            "Morning": _weather_phrase_from_code(code, "morning"),
+            "Afternoon": _weather_phrase_from_code(code, "afternoon"),
+            "Night": _weather_phrase_from_code(code, "night"),
+            "Rainfall distribution": rain_text,
+            "Maximum temperature": f"{int(round(tmax))}℃" if tmax is not None else "N/A",
+            "Minimum temperature": f"{int(round(tmin))}℃" if tmin is not None else "N/A",
+            "Winds": wind_text,
+        }
+
+    return rows
+
+
+def _extract_centroid_from_observation_csv(csv_bytes: bytes) -> Optional[Dict[str, float]]:
+    try:
+        df = pd.read_csv(io.BytesIO(csv_bytes))
+    except Exception:
+        return None
+
+    lat_col = _resolve_column(df.columns, ["lat", "latitude", "y"])
+    lon_col = _resolve_column(df.columns, ["lon", "lng", "long", "longitude", "x"])
+    if not lat_col or not lon_col:
+        return None
+
+    latitudes = pd.to_numeric(df[lat_col], errors="coerce").dropna().tolist()
+    longitudes = pd.to_numeric(df[lon_col], errors="coerce").dropna().tolist()
+    if not latitudes or not longitudes:
+        return None
+
+    lat, lon = centroid_from_rows(latitudes, longitudes)
+    return {"lat": float(lat), "lon": float(lon)}
+
+
+def _build_prepared_csv_frames(df: pd.DataFrame) -> Dict[str, Any]:
+    lat_col = _resolve_column(df.columns, ["lat", "latitude", "y"])
+    lon_col = _resolve_column(df.columns, ["lon", "lng", "long", "longitude", "x"])
+    if not lat_col or not lon_col:
+        raise ValueError("Observation CSV must contain latitude and longitude columns.")
+
+    rain_col = _resolve_column(df.columns, ["rainfall", "rain", "precipitation", "precip", "rr"])
+    tmin_col = _resolve_column(df.columns, ["tmin", "min_temp", "minimum_temperature", "tn"])
+    tmax_col = _resolve_column(df.columns, ["tmax", "max_temp", "maximum_temperature", "tx"])
+    station_col = _resolve_column(df.columns, ["station", "station_name", "name", "code"])
+
+    station_frame = pd.DataFrame(
+        {
+            "lat": pd.to_numeric(df[lat_col], errors="coerce"),
+            "lon": pd.to_numeric(df[lon_col], errors="coerce"),
+            "station_name": (
+                df[station_col].astype(str).str.strip()
+                if station_col
+                else pd.Series([f"Station {i+1}" for i in range(len(df))], index=df.index)
+            ),
+            "rainfall": (
+                pd.to_numeric(df[rain_col], errors="coerce")
+                if rain_col
+                else pd.Series([None] * len(df), index=df.index)
+            ),
+            "tmin": (
+                pd.to_numeric(df[tmin_col], errors="coerce")
+                if tmin_col
+                else pd.Series([None] * len(df), index=df.index)
+            ),
+            "tmax": (
+                pd.to_numeric(df[tmax_col], errors="coerce")
+                if tmax_col
+                else pd.Series([None] * len(df), index=df.index)
+            ),
+        }
+    )
+    station_frame = station_frame.dropna(subset=["lat", "lon"]).copy()
+    if station_frame.empty:
+        raise ValueError("No valid rows after normalizing latitude and longitude.")
+
+    map_frame = station_frame.rename(
+        columns={
+            "lat": "Lat",
+            "lon": "Lon",
+            "rainfall": "Rain",
+            "tmin": "Tmin",
+            "tmax": "Tmax",
+        }
+    )[["Lat", "Lon", "Rain", "Tmin", "Tmax"]]
+
+    # Ensure single point per cell to avoid duplicate pivot-key collisions in create_weather_map.
+    map_frame = (
+        map_frame.groupby(["Lat", "Lon"], as_index=False)
+        .agg({"Rain": "mean", "Tmin": "mean", "Tmax": "mean"})
+        .sort_values(["Lat", "Lon"])
+        .reset_index(drop=True)
+    )
+
+    variables: List[str] = []
+    if map_frame["Rain"].notna().any():
+        variables.append("rainfall")
+    if map_frame["Tmin"].notna().any():
+        variables.append("tmin")
+    if map_frame["Tmax"].notna().any():
+        variables.append("tmax")
+
+    return {
+        "station_frame": station_frame,
+        "map_frame": map_frame,
+        "variables": variables,
+    }
+
+
+def _persist_csv_cache_artifact(
+    *,
+    supabase_admin,
+    user_id: str,
+    county_name: str,
+    report_week: int,
+    report_year: int,
+    report_start_at: str,
+    report_end_at: str,
+    cache_type: str,
+    file_name: str,
+    csv_bytes: bytes,
+    source_hash: str,
+) -> str:
+    storage_path = (
+        f"users/{user_id}/cache/"
+        f"week_{report_week}_{report_year}/{cache_type}/{file_name}"
+    )
+    supabase_admin.storage.from_(BUCKET_NAME).upload(
+        path=storage_path,
+        file=csv_bytes,
+        file_options={"content-type": "text/csv", "upsert": "true"},
+    )
+
+    # Non-blocking metadata upsert; keep workflow resilient if table isn't available.
+    try:
+        supabase_admin.table("forecast_cache_files").upsert(
+            {
+                "user_id": user_id,
+                "county_name": county_name,
+                "report_week": report_week,
+                "report_year": report_year,
+                "cache_type": cache_type,
+                "file_path": storage_path,
+                "source_hash": source_hash,
+                "report_start_at": report_start_at,
+                "report_end_at": report_end_at,
+                "bucket_name": BUCKET_NAME,
+                "file_size_bytes": len(csv_bytes),
+                "model_version": "workflow-v1",
+                "source_version": "step1-prepared",
+                "updated_at": datetime.utcnow().isoformat(),
+            },
+            on_conflict="user_id,county_name,report_year,report_week,cache_type,source_hash",
+        ).execute()
+    except Exception as exc:
+        print(f"⚠️ Failed to write forecast_cache_files metadata: {exc}")
+
+    return storage_path
+
+
+def _load_cached_map_csv_bytes(
+    *,
+    supabase_admin,
+    user_id: str,
+    county_name: str,
+    report_week: int,
+    report_year: int,
+) -> Optional[Dict[str, Any]]:
+    try:
+        response = (
+            supabase_admin.table("forecast_cache_files")
+            .select("file_path,bucket_name,updated_at")
+            .eq("user_id", user_id)
+            .eq("county_name", county_name)
+            .eq("report_week", report_week)
+            .eq("report_year", report_year)
+            .eq("cache_type", "map_input_csv")
+            .order("updated_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = response.data or []
+        if not rows:
+            return None
+
+        row = rows[0]
+        file_path = row.get("file_path")
+        if not file_path:
+            return None
+        bucket = row.get("bucket_name") or BUCKET_NAME
+        file_bytes = supabase_admin.storage.from_(bucket).download(file_path)
+        return {"bytes": file_bytes, "file_path": file_path, "bucket": bucket}
+    except Exception as exc:
+        print(f"⚠️ Unable to load cached map CSV: {exc}")
+        return None
+
+
+def _load_observation_bytes_with_fallback(
+    supabase,
+    user_id: str,
+    report_week: int,
+    report_year: int,
+    county_name: str,
+    report_start_at: str,
+    report_end_at: str,
+    persist_auto_upload: bool = False,
+    supabase_admin=None,
+) -> Dict[str, Any]:
+    """
+    Observation resolution strategy:
+    1) Uploaded observation CSV for the selected week/year
+    2) Auto-fetch from TAHMO/KMD aggregated over 3 months ending previous-week day
+    3) Open-Meteo historical fallback if TAHMO/KMD are unavailable
+    """
+    upload = (
+        supabase.table("uploads")
+        .select("id, file_name, file_path")
+        .eq("user_id", user_id)
+        .eq("file_type", "observations")
+        .eq("report_week", report_week)
+        .eq("report_year", report_year)
+        .order("uploaded_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    rows = upload.data or []
+    if rows:
+        obs = rows[0]
+        file_bytes = supabase.storage.from_(BUCKET_NAME).download(obs["file_path"])
+        return {
+            "bytes": file_bytes,
+            "observation_file_id": obs.get("id"),
+            "observation_label": obs.get("file_name", "uploaded_observation.csv"),
+            "source_type": "upload",
+            "meta": {},
+        }
+
+    auto_bytes, meta = fetch_aggregated_station_csv_bytes(
+        county_name=county_name,
+        report_start_at=report_start_at,
+    )
+    payload = {
+        "bytes": auto_bytes,
+        "observation_file_id": None,
+        "observation_label": (
+            f"auto_station_data_{county_name}_{meta['window_start']}_to_{meta['window_end']}.csv"
+        ),
+        "source_type": "auto_fetch",
+        "meta": meta,
+    }
+    if not persist_auto_upload or supabase_admin is None:
+        return payload
+
+    auto_upload_id = str(uuid.uuid4())
+    auto_file_name = payload["observation_label"]
+    auto_storage_path = (
+        f"users/{user_id}/observations/"
+        f"auto_{report_week}_{report_year}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+    )
+    supabase_admin.storage.from_(BUCKET_NAME).upload(
+        path=auto_storage_path,
+        file=auto_bytes,
+        file_options={"content-type": "text/csv"},
+    )
+    supabase_admin.table("uploads").insert(
+        {
+            "id": auto_upload_id,
+            "user_id": user_id,
+            "file_name": auto_file_name,
+            "file_path": auto_storage_path,
+            "file_type": "observations",
+            "status": "auto_fetched",
+            "report_week": report_week,
+            "report_year": report_year,
+            "report_start_at": report_start_at,
+            "report_end_at": report_end_at,
+        }
+    ).execute()
+    payload["observation_file_id"] = auto_upload_id
+    payload["source_type"] = "auto_fetch_persisted"
+    return payload
+
+
+def _get_user_county(supabase, user_id: str, fallback: str = "Unknown") -> str:
+    try:
+        profile = (
+            supabase.table("profiles")
+            .select("county")
+            .eq("id", user_id)
+            .limit(1)
+            .execute()
+        )
+        rows = profile.data or []
+        county = (rows[0].get("county") if rows else None) or fallback
+        return str(county)
+    except Exception:
+        return fallback
+
+
+def _is_missing_column_error(exc: Exception, column_name: str) -> bool:
+    text = str(exc).lower()
+    return "does not exist" in text and f".{column_name.lower()}" in text
 
 
 def get_or_create_workflow_status(
@@ -38,15 +548,17 @@ def get_or_create_workflow_status(
     report_week: int,
     report_year: int,
     observation_file_id: Optional[str] = None,
+    report_start_at: Optional[str] = None,
+    report_end_at: Optional[str] = None,
 ) -> Optional[int]:
     """Get existing workflow row for period or create a new one."""
     try:
+        # Schema-aligned: workflow_status has no report_week/report_year columns.
         existing = (
             supabase_admin.table("workflow_status")
             .select("id")
             .eq("user_id", user_id)
-            .eq("report_week", report_week)
-            .eq("report_year", report_year)
+            .order("updated_at", desc=True)
             .limit(1)
             .execute()
         )
@@ -55,8 +567,6 @@ def get_or_create_workflow_status(
 
         insert_payload: Dict[str, Any] = {
             "user_id": user_id,
-            "report_week": report_week,
-            "report_year": report_year,
             "uploaded": False,
             "aggregated": False,
             "mapped": False,
@@ -149,6 +659,135 @@ class MapGenerationResponse(BaseModel):
     outputs: List[MapOutput]
 
 
+class AsyncReportStartResponse(BaseModel):
+    accepted: bool
+    workflow_status_id: Optional[int] = None
+    report_week: int
+    report_year: int
+    message: str
+
+
+@router.get("/status")
+async def get_workflow_status(
+    week: Optional[int] = Query(default=None),
+    year: Optional[int] = Query(default=None),
+    user=Depends(get_current_user),
+):
+    supabase = get_supabase_anon()
+    user_id = user.id if hasattr(user, "id") else user.get("id")
+
+    # Schema-aligned: workflow_status has no report_week/report_year columns.
+    # Keep query params for API compatibility, but resolve latest status for user.
+    response = (
+        supabase.table("workflow_status")
+        .select("*")
+        .eq("user_id", user_id)
+        .order("updated_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+
+    rows = response.data or []
+    if not rows:
+        raise HTTPException(status_code=404, detail="Workflow status not found")
+    row = rows[0]
+    workflow_status_id = row.get("id")
+    if workflow_status_id is not None:
+        try:
+            logs_response = (
+                supabase.table("workflow_logs")
+                .select("stage,status,message,created_at")
+                .eq("workflow_status_id", workflow_status_id)
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            logs = logs_response.data or []
+            row["latest_log"] = logs[0] if logs else None
+        except Exception:
+            row["latest_log"] = None
+    else:
+        row["latest_log"] = None
+    return row
+
+
+async def _run_report_generation_background(
+    request: ReportGenerationRequest,
+    user_payload: Dict[str, Any],
+    task_key: str,
+):
+    try:
+        await generate_report(request=request, user=user_payload)
+    except Exception as exc:
+        logger.exception("background_report_generation_failed", extra={"error": str(exc)})
+    finally:
+        BACKGROUND_REPORT_TASKS.pop(task_key, None)
+
+
+@router.post("/generate-report-async", response_model=AsyncReportStartResponse)
+async def generate_report_async(
+    request: ReportGenerationRequest,
+    user=Depends(get_current_user),
+):
+    """
+    Start Step 4 report generation as a background task.
+    The task continues server-side even if user navigates to another page.
+    """
+    supabase_admin = get_supabase_admin()
+    user_id = user.id if hasattr(user, "id") else user.get("id")
+    user_email = getattr(user, "email", None) or (user.get("email") if isinstance(user, dict) else None)
+
+    workflow_status_id = get_or_create_workflow_status(
+        supabase_admin=supabase_admin,
+        user_id=user_id,
+        report_week=request.week_number,
+        report_year=request.year,
+        report_start_at=request.report_start_at,
+        report_end_at=request.report_end_at,
+    )
+    if workflow_status_id is not None:
+        update_workflow_status_flags(
+            supabase_admin=supabase_admin,
+            workflow_status_id=workflow_status_id,
+            flags={"generated": False, "completed": False},
+        )
+        append_workflow_log(
+            supabase_admin=supabase_admin,
+            workflow_status_id=workflow_status_id,
+            stage="report_generation",
+            status="in_progress",
+            message="Background report generation started",
+        )
+
+    task_key = f"{user_id}:{request.week_number}:{request.year}"
+    existing = BACKGROUND_REPORT_TASKS.get(task_key)
+    if existing and not existing.done():
+        return AsyncReportStartResponse(
+            accepted=True,
+            workflow_status_id=workflow_status_id,
+            report_week=request.week_number,
+            report_year=request.year,
+            message="Report generation is already running in background",
+        )
+
+    user_payload = {"id": user_id, "email": user_email}
+    BACKGROUND_REPORT_TASKS[task_key] = asyncio.create_task(
+        _run_report_generation_background(
+            request=request,
+            user_payload=user_payload,
+            task_key=task_key,
+        )
+    )
+
+    return AsyncReportStartResponse(
+        accepted=True,
+        workflow_status_id=workflow_status_id,
+        report_week=request.week_number,
+        report_year=request.year,
+        message="Background report generation started",
+    )
+
+
 # ============================================================================
 # STEP 1: VALIDATE INPUTS
 # ============================================================================
@@ -168,6 +807,18 @@ async def validate_inputs(
     supabase_admin = get_supabase_admin()
     user_id = user.id if hasattr(user, "id") else user.get("id")
     workflow_status_id: Optional[int] = None
+
+    # Monday-only lock: workflow preparation is run only on Mondays so the
+    # forecast period stays constant (Tuesday -> next Monday).
+    now = datetime.now()
+    if now.weekday() != 0:  # Monday=0
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Step 1 is available on Monday only. "
+                "Reporting period is fixed to Tuesday through next Monday."
+            ),
+        )
     
     print(f"👤 User ID: {user_id}")
     print(f"🪣 Using bucket: {BUCKET_NAME}")
@@ -239,68 +890,70 @@ async def validate_inputs(
         print(f"❌ Error fetching observation files: {e}")
     
     # =========================
-    # 1️⃣ FIND OBSERVATION FILE for SPECIFIED report week/year
+    # 1️⃣ RESOLVE OBSERVATION DATA (UPLOAD OR AUTO-FETCH)
     # =========================
     print("\n" + "-"*40)
-    print(f"🔍 LOOKING FOR WEEK {request.report_week} OBSERVATION FILE")
+    print(f"🔍 RESOLVING OBSERVATION DATA FOR WEEK {request.report_week}")
     print("-"*40)
-    
-    print(f"🔍 Query filters:")
-    print(f"   - user_id: {user_id}")
-    print(f"   - file_type: observations")
-    print(f"   - report_week: {request.report_week}")
-    print(f"   - report_year: {request.report_year}")
-    
-    try:
-        uploads_response = supabase.table("uploads")\
-            .select("id,file_name,file_path,uploaded_at,report_week,report_year,report_start_at,report_end_at")\
-            .eq("user_id", user_id)\
-            .eq("file_type", "observations")\
-            .eq("report_week", request.report_week)\
-            .eq("report_year", request.report_year)\
-            .order("uploaded_at", desc=True)\
-            .limit(1)\
-            .execute()
-        
-        uploads = uploads_response.data or []
-        print(f"📊 Query returned {len(uploads)} results")
-        
-        if uploads:
-            print(f"✅ Found: {uploads[0].get('file_name')}")
-        else:
-            print(f"❌ No file found for week {request.report_week}")
-            
-    except Exception as e:
-        print(f"❌ Error in query: {e}")
-        uploads = []
 
-    if not uploads:
-        print("\n❌ VALIDATION FAILED: No observation file found")
+    try:
+        user_county = _get_user_county(supabase_admin, user_id=user_id, fallback="Unknown")
+        obs_payload = _load_observation_bytes_with_fallback(
+            supabase=supabase,
+            user_id=user_id,
+            report_week=request.report_week,
+            report_year=request.report_year,
+            county_name=user_county,
+            report_start_at=request.report_start_at,
+            report_end_at=request.report_end_at,
+            persist_auto_upload=True,
+            supabase_admin=supabase_admin,
+        )
+        source_type = obs_payload["source_type"]
+        print(f"✅ Observation source resolved: {source_type}")
+        print(f"📁 Label: {obs_payload['observation_label']}")
+        if str(source_type).startswith("auto_fetch"):
+            window_start, window_end = get_three_month_window_from_previous_week(
+                request.report_start_at
+            )
+            print(
+                f"🧮 Auto-fetch aggregation window: {window_start} to {window_end} "
+                "(3 months ending previous-week day)"
+            )
+    except Exception as e:
+        print(f"❌ Observation resolution failed: {e}")
         workflow_status_id = get_or_create_workflow_status(
             supabase_admin=supabase_admin,
             user_id=user_id,
             report_week=request.report_week,
             report_year=request.report_year,
+            report_start_at=request.report_start_at,
+            report_end_at=request.report_end_at,
         )
         append_workflow_log(
             supabase_admin,
             workflow_status_id,
             stage="validate_inputs",
             status="error",
-            message="Validation failed: observation file not found",
+            message="Validation failed: no observation data from upload or TAHMO/KMD/Open-Meteo auto-fetch",
         )
         raise HTTPException(
-            status_code=404, 
-            detail=f"No observation file found for week {request.report_week}, {request.report_year}. Please upload the observation file for this reporting period."
+            status_code=404,
+            detail=(
+                f"No observation data found for week {request.report_week}, {request.report_year}. "
+                "Upload observations or configure TAHMO/KMD/Open-Meteo auto-fetch."
+            ),
         )
 
-    obs = uploads[0]
+    observation_file_id = obs_payload.get("observation_file_id")
     workflow_status_id = get_or_create_workflow_status(
         supabase_admin=supabase_admin,
         user_id=user_id,
         report_week=request.report_week,
         report_year=request.report_year,
-        observation_file_id=obs["id"],
+        observation_file_id=observation_file_id,
+        report_start_at=request.report_start_at,
+        report_end_at=request.report_end_at,
     )
     append_workflow_log(
         supabase_admin,
@@ -309,9 +962,7 @@ async def validate_inputs(
         status="info",
         message="Starting validation for observation and shapefile inputs",
     )
-    print(f"\n✅ Using observation file: {obs['file_name']}")
-    print(f"   Week: {obs['report_week']}")
-    print(f"   Path: {obs['file_path']}")
+    print(f"\n✅ Using observation data: {obs_payload['observation_label']}")
 
     # =========================
     # 2️⃣ FIND SHAPEFILE
@@ -353,19 +1004,14 @@ async def validate_inputs(
     shp = shapes[0]
 
     # =========================
-    # 3️⃣ DOWNLOAD OBSERVATION FILE
+    # 3️⃣ LOAD OBSERVATION DATAFRAME
     # =========================
     print("\n" + "-"*40)
-    print("⬇️ DOWNLOADING OBSERVATION FILE")
+    print("⬇️ LOADING OBSERVATION DATA")
     print("-"*40)
     
     try:
-        file_path = obs["file_path"]
-        print(f"📁 File path: {file_path}")
-        print(f"🪣 Using bucket: {BUCKET_NAME}")
-        
-        # Download file from storage using the configured bucket
-        file_data = supabase.storage.from_(BUCKET_NAME).download(file_path)
+        file_data = obs_payload["bytes"]
         print(f"✅ Download successful: {len(file_data)} bytes")
         
         # Read CSV from bytes
@@ -385,34 +1031,69 @@ async def validate_inputs(
         raise HTTPException(status_code=400, detail=f"Failed to read observation file: {str(e)}")
 
     # =========================
-    # 4️⃣ DETECT VARIABLES
+    # 4️⃣ PREPARE CSV ARTIFACTS + DETECT MAP VARIABLES
     # =========================
     print("\n" + "-"*40)
-    print("🔎 DETECTING VARIABLES")
+    print("🧮 PREPARING MAP INPUT CSVs")
     print("-"*40)
-    
-    possible_vars = {
-        "rainfall": ["rain", "rainfall", "precip", "precipitation", "rr"],
-        "tmin": ["tmin", "min_temp", "minimum_temperature", "tn"],
-        "tmax": ["tmax", "max_temp", "maximum_temperature", "tx"],
-        "wind": ["wind", "wind_speed", "windspeed", "ff"],
-        "humidity": ["humidity", "rh", "relative_humidity"],
-        "pressure": ["pressure", "pres", "atmospheric_pressure"],
-    }
+    prepared_observation_csv_path: Optional[str] = None
+    prepared_map_csv_path: Optional[str] = None
+    try:
+        prepared = _build_prepared_csv_frames(df)
+        station_frame = prepared["station_frame"]
+        map_frame = prepared["map_frame"]
+        found = prepared["variables"]
 
-    cols = [str(c).lower().strip() for c in df.columns]
-    print(f"📋 Lowercase columns: {cols}")
-    
-    found = []
+        if not found:
+            raise ValueError(
+                "No map-ready variables found after formatting. Need at least one of rainfall, tmin, or tmax."
+            )
 
-    for var, aliases in possible_vars.items():
-        for alias in aliases:
-            if any(alias in col for col in cols):
-                found.append(var)
-                print(f"✅ Found {var} (matched alias: {alias})")
-                break
+        station_csv_bytes = station_frame.to_csv(index=False).encode("utf-8")
+        map_csv_bytes = map_frame.to_csv(index=False).encode("utf-8")
+        source_hash = hashlib.sha256(file_data).hexdigest()
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
 
-    print(f"📊 Detected variables: {found}")
+        prepared_observation_csv_path = _persist_csv_cache_artifact(
+            supabase_admin=supabase_admin,
+            user_id=user_id,
+            county_name=user_county,
+            report_week=request.report_week,
+            report_year=request.report_year,
+            report_start_at=request.report_start_at,
+            report_end_at=request.report_end_at,
+            cache_type="station_observation_csv",
+            file_name=f"station_observation_{request.report_year}_{request.report_week}_{timestamp}.csv",
+            csv_bytes=station_csv_bytes,
+            source_hash=source_hash,
+        )
+        prepared_map_csv_path = _persist_csv_cache_artifact(
+            supabase_admin=supabase_admin,
+            user_id=user_id,
+            county_name=user_county,
+            report_week=request.report_week,
+            report_year=request.report_year,
+            report_start_at=request.report_start_at,
+            report_end_at=request.report_end_at,
+            cache_type="map_input_csv",
+            file_name=f"map_input_{request.report_year}_{request.report_week}_{timestamp}.csv",
+            csv_bytes=map_csv_bytes,
+            source_hash=source_hash,
+        )
+
+        print(f"✅ Prepared station CSV rows: {len(station_frame)}")
+        print(f"✅ Prepared map CSV rows: {len(map_frame)}")
+        print(f"✅ Map variables detected: {found}")
+    except Exception as e:
+        print(f"❌ Failed preparing CSV artifacts: {e}")
+        append_workflow_log(
+            supabase_admin,
+            workflow_status_id,
+            stage="validate_inputs",
+            status="error",
+            message=f"Validation failed during CSV preparation: {str(e)}",
+        )
+        raise HTTPException(status_code=400, detail=f"Failed preparing map CSVs: {str(e)}")
 
     # =========================
     # 5️⃣ UPDATE WORKFLOW STATUS
@@ -426,7 +1107,9 @@ async def validate_inputs(
             user_id=user_id,
             report_week=request.report_week,
             report_year=request.report_year,
-            observation_file_id=obs["id"],
+            observation_file_id=observation_file_id,
+            report_start_at=request.report_start_at,
+            report_end_at=request.report_end_at,
         )
     if workflow_status_id is not None:
         update_workflow_status_flags(
@@ -435,7 +1118,7 @@ async def validate_inputs(
             flags={
                 "uploaded": True,
                 "aggregated": True,
-                "observation_file_id": obs["id"],
+                "observation_file_id": observation_file_id,
             },
         )
         append_workflow_log(
@@ -443,7 +1126,10 @@ async def validate_inputs(
             workflow_status_id,
             stage="validate_inputs",
             status="success",
-            message=f"Validation completed: {len(found)} variables detected",
+            message=(
+                f"Preparation completed: {len(found)} map variable(s) detected; "
+                "station and map CSVs created"
+            ),
         )
         print("✅ Workflow status updated")
 
@@ -451,16 +1137,16 @@ async def validate_inputs(
     # 6️⃣ RETURN RESPONSE
     # =========================
     print("\n" + "-"*40)
-    print("✅ VALIDATION COMPLETE")
+    print("✅ PREPARATION COMPLETE")
     print("-"*40)
-    print(f"📊 Response: {len(found)} variables, {len(df)} rows")
+    print(f"📊 Response: {len(found)} variables, {len(df)} source rows")
     print("="*60 + "\n")
     
     return ValidationResponse(
         observation_found=True,
         shapefile_found=True,
         variables=found,
-        observation_file=obs["file_name"],
+        observation_file=obs_payload["observation_label"],
         shapefile=shp["file_name"],
         report_week=request.report_week,
         report_year=request.report_year,
@@ -469,7 +1155,9 @@ async def validate_inputs(
             end=request.report_end_at
         ),
         column_count=len(df.columns),
-        row_count=len(df)
+        row_count=len(df),
+        prepared_observation_csv_path=prepared_observation_csv_path,
+        prepared_map_csv_path=prepared_map_csv_path,
     )
 
 
@@ -496,6 +1184,8 @@ async def generate_maps(
         user_id=user_id,
         report_week=request.report_week,
         report_year=request.report_year,
+        report_start_at=request.report_start_at,
+        report_end_at=request.report_end_at,
     )
     append_workflow_log(
         supabase_admin,
@@ -512,33 +1202,71 @@ async def generate_maps(
     print(f"📅 Period: {request.report_start_at} to {request.report_end_at}")
 
     # =========================
-    # 1. GET OBSERVATION FILE
+    # 1. RESOLVE PREPARED MAP CSV (CACHE-FIRST)
     # =========================
+    county_for_fetch = (
+        request.county
+        if request.county and request.county != "—"
+        else _get_user_county(supabase, user_id=user_id, fallback="Unknown")
+    )
+    resolved_map_csv_bytes: Optional[bytes] = None
     try:
-        upload = (
-            supabase.table("uploads")
-            .select("id, file_name, file_path")
-            .eq("user_id", user_id)
-            .eq("file_type", "observations")
-            .eq("report_week", request.report_week)
-            .eq("report_year", request.report_year)
-            .order("uploaded_at", desc=True)
-            .limit(1)
-            .execute()
+        cached_map_csv = _load_cached_map_csv_bytes(
+            supabase_admin=supabase_admin,
+            user_id=user_id,
+            county_name=county_for_fetch,
+            report_week=request.report_week,
+            report_year=request.report_year,
         )
-
-        if not upload.data:
-            raise HTTPException(
-                status_code=404,
-                detail=f"No observation file found for week {request.report_week}",
+        if cached_map_csv:
+            resolved_map_csv_bytes = cached_map_csv["bytes"]
+            print(f"✅ Using cached prepared map CSV: {cached_map_csv['file_path']}")
+            append_workflow_log(
+                supabase_admin,
+                workflow_status_id,
+                stage="observation_context",
+                status="success",
+                message="Using prepared map CSV from cache",
             )
-
-        obs = upload.data[0]
-        print(f"✅ Observation file: {obs['file_name']}")
-
+        else:
+            obs_payload = _load_observation_bytes_with_fallback(
+                supabase=supabase,
+                user_id=user_id,
+                report_week=request.report_week,
+                report_year=request.report_year,
+                county_name=county_for_fetch,
+                report_start_at=request.report_start_at,
+                report_end_at=request.report_end_at,
+                persist_auto_upload=True,
+                supabase_admin=supabase_admin,
+            )
+            resolved_map_csv_bytes = obs_payload["bytes"]
+            print("⚠️ Prepared map CSV cache miss, using observation CSV directly")
+            print(f"✅ Observation source: {obs_payload['source_type']}")
+            print(f"✅ Observation label: {obs_payload['observation_label']}")
+            if workflow_status_id is not None:
+                update_workflow_status_flags(
+                    supabase_admin=supabase_admin,
+                    workflow_status_id=workflow_status_id,
+                    flags={
+                        "uploaded": True,
+                        "aggregated": True,
+                        "observation_file_id": obs_payload.get("observation_file_id"),
+                    },
+                )
+            append_workflow_log(
+                supabase_admin,
+                workflow_status_id,
+                stage="observation_context",
+                status="info",
+                message="Prepared CSV cache miss; fell back to raw observation CSV",
+            )
     except Exception as e:
-        print(f"❌ Error fetching observation file: {e}")
-        raise HTTPException(status_code=500, detail="Failed to fetch observation file")
+        print(f"❌ Error resolving map input data: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to resolve map input CSV from cache or observation fallback",
+        )
 
     # =========================
     # 2. GET ALL SHAPEFILE COMPONENTS FROM shared_files
@@ -566,12 +1294,14 @@ async def generate_maps(
         raise HTTPException(status_code=500, detail="Failed to fetch shapefiles")
 
     # =========================
-    # 3. DOWNLOAD OBSERVATION FILE
+    # 3. PREPARE MAP INPUT CSV
     # =========================
     temp_csv = None
     try:
-        file_data = supabase.storage.from_(BUCKET_NAME).download(obs["file_path"])
-        print(f"\n✅ Downloaded observation: {len(file_data)} bytes")
+        file_data = resolved_map_csv_bytes or b""
+        if not file_data:
+            raise ValueError("Resolved map CSV is empty")
+        print(f"\n✅ Loaded map input data: {len(file_data)} bytes")
 
         temp_csv = f"/tmp/weather_data_{user_id}_{request.report_week}.csv"
         with open(temp_csv, "wb") as f:
@@ -659,13 +1389,24 @@ async def generate_maps(
         print(f"{'=' * 50}")
 
         try:
-            # Generate map with downloaded files
-            image_bytes, filename = create_weather_map(
-                county_name=request.county if request.county != "—" else None,
-                variable=col_name,
-                data_file=temp_csv,
-                shapefile_path=local_shapefile_path,  # Path to .shp file
-            )
+            # Rainfall map: station-observation interpolation with Open-Meteo blend
+            if variable == "rainfall":
+                image_bytes, filename = create_reliable_rainfall_map(
+                    county_name=request.county if request.county != "—" else "County",
+                    data_file=temp_csv,
+                    shapefile_path=local_shapefile_path,
+                    report_start_at=request.report_start_at,
+                    report_end_at=request.report_end_at,
+                    title_period_label="OND 2025",
+                )
+            else:
+                # Non-rainfall maps use legacy gridded workflow for now.
+                image_bytes, filename = create_weather_map(
+                    county_name=request.county if request.county != "—" else None,
+                    variable=col_name,
+                    data_file=temp_csv,
+                    shapefile_path=local_shapefile_path,
+                )
 
             print(f"✅ Map generated: {filename} ({len(image_bytes)} bytes)")
 
@@ -830,8 +1571,16 @@ async def generate_report(
     )
 
     stage_statuses = []
+    workflow_status_id: Optional[int] = None
 
-    def add_stage(stage: str, status: str, message: str):
+    def add_stage(
+        stage: str,
+        status: str,
+        message: str,
+        *,
+        workflow_flags: Optional[Dict[str, Any]] = None,
+        log_stage: Optional[str] = None,
+    ):
         stage_statuses.append(
             {
                 "stage": stage,
@@ -840,59 +1589,64 @@ async def generate_report(
                 "timestamp": datetime.utcnow().isoformat() + "Z",
             }
         )
+        append_workflow_log(
+            supabase_admin,
+            workflow_status_id,
+            stage=log_stage or stage,
+            status=status,
+            message=message,
+        )
+        if workflow_flags and workflow_status_id is not None:
+            update_workflow_status_flags(
+                supabase_admin=supabase_admin,
+                workflow_status_id=workflow_status_id,
+                flags=workflow_flags,
+            )
 
     add_stage("report_generation", "in_progress", "Step 4 started")
-    workflow_status_id: Optional[int] = get_or_create_workflow_status(
+    workflow_status_id = get_or_create_workflow_status(
         supabase_admin=supabase_admin,
         user_id=user_id,
         report_week=request.week_number,
         report_year=request.year,
+        report_start_at=request.report_start_at,
+        report_end_at=request.report_end_at,
     )
 
     # ------------------------------------------------------------------
     # 1. Gather observation + map context for AI narration
     # ------------------------------------------------------------------
+    centroid = None
+    open_meteo_daily = {}
+    observation_file_id = None
+    observation_label = "observation_data.csv"
     try:
         add_stage(
             "observation_context",
             "in_progress",
             "Loading observation file for selected report window",
         )
-        upload = (
-            supabase_admin.table("uploads")
-            .select("id,file_name,file_path")
-            .eq("user_id", user_id)
-            .eq("file_type", "observations")
-            .eq("report_week", request.week_number)
-            .eq("report_year", request.year)
-            .order("uploaded_at", desc=True)
-            .limit(1)
-            .execute()
+        obs_payload = _load_observation_bytes_with_fallback(
+            supabase=supabase_admin,
+            user_id=user_id,
+            report_week=request.week_number,
+            report_year=request.year,
+            county_name=request.county_name,
+            report_start_at=request.report_start_at,
+            report_end_at=request.report_end_at,
+            persist_auto_upload=True,
+            supabase_admin=supabase_admin,
         )
-        if not upload.data:
-            add_stage(
-                "observation_context",
-                "failed",
-                "No observation file found for selected window",
-            )
-            raise HTTPException(
-                status_code=404,
-                detail=(
-                    f"No observation file found for week {request.week_number}, "
-                    f"{request.year}. Generate maps/validate for this window first."
-                ),
-            )
-
-        obs = upload.data[0]
+        observation_file_id = obs_payload.get("observation_file_id")
+        observation_label = obs_payload.get("observation_label", observation_label)
         if workflow_status_id is not None:
             update_workflow_status_flags(
                 supabase_admin=supabase_admin,
                 workflow_status_id=workflow_status_id,
-                flags={"observation_file_id": obs["id"], "uploaded": True},
+                flags={"observation_file_id": observation_file_id, "uploaded": True},
             )
-        observation_bytes = supabase_admin.storage.from_(BUCKET_NAME).download(
-            obs["file_path"]
-        )
+        observation_bytes = obs_payload["bytes"]
+        centroid = _extract_centroid_from_observation_csv(observation_bytes)
         observation_summary = summarize_observation_data(
             csv_bytes=observation_bytes,
             requested_variables=request.variables,
@@ -900,7 +1654,7 @@ async def generate_report(
         add_stage(
             "observation_context",
             "completed",
-            f"Observation data prepared from {obs['file_name']}",
+            f"Observation data prepared from {observation_label}",
         )
     except HTTPException:
         raise
@@ -909,9 +1663,45 @@ async def generate_report(
         add_stage(
             "observation_context",
             "failed",
-            "Failed to read observation data",
+            "Failed to read observation data from upload or TAHMO/KMD/Open-Meteo auto-fetch",
         )
-        raise HTTPException(status_code=500, detail="Failed to read observation data")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to read observation data from upload or TAHMO/KMD/Open-Meteo auto-fetch",
+        )
+
+    try:
+        if centroid:
+            add_stage(
+                "open_meteo_forecast",
+                "in_progress",
+                "Fetching Open-Meteo daily forecast for report window",
+            )
+            open_meteo_daily = fetch_daily_forecast(
+                latitude=centroid["lat"],
+                longitude=centroid["lon"],
+                report_start_at=request.report_start_at,
+                report_end_at=request.report_end_at,
+            )
+            add_stage(
+                "open_meteo_forecast",
+                "completed",
+                "Open-Meteo forecast loaded",
+            )
+        else:
+            add_stage(
+                "open_meteo_forecast",
+                "failed",
+                "No station coordinates found; Open-Meteo forecast unavailable",
+            )
+    except Exception as e:
+        print(f"⚠️ Failed to fetch Open-Meteo forecast: {e}")
+        open_meteo_daily = {}
+        add_stage(
+            "open_meteo_forecast",
+            "failed",
+            "Failed to load Open-Meteo forecast; report uses fallback placeholders",
+        )
 
     rainfall_map_storage_path = None
     try:
@@ -970,17 +1760,11 @@ async def generate_report(
     # ------------------------------------------------------------------
     # 2. Generate AI narration from maps + observation summary
     # ------------------------------------------------------------------
-    append_workflow_log(
-        supabase_admin,
-        workflow_status_id,
-        stage="generate_narration",
-        status="info",
-        message="Generating AI narration from map and observation context",
-    )
     add_stage(
         "ai_narration",
         "in_progress",
         "Generating weekly narration from observation and map context",
+        log_stage="generate_narration",
     )
     narration = await generate_report_narration(
         county_name=request.county_name,
@@ -998,20 +1782,15 @@ async def generate_report(
             "ai_narration",
             "completed",
             "AI narration unavailable; fallback narration applied",
+            log_stage="generate_narration",
         )
     else:
         add_stage(
             "ai_narration",
             "completed",
             f"AI narration generated via {narration_source}",
+            log_stage="generate_narration",
         )
-    append_workflow_log(
-        supabase_admin,
-        workflow_status_id,
-        stage="generate_narration",
-        status="success",
-        message=f"Narration generated via {narration_source}",
-    )
 
     # ------------------------------------------------------------------
     # 3. Build structured data payload for the PDF helper
@@ -1053,6 +1832,66 @@ async def generate_report(
 
     issue_date = datetime.utcnow().strftime("%Y-%m-%d")
     period_str = f"{request.report_start_at} to {request.report_end_at}"
+    report_dates = []
+    start_date = datetime.fromisoformat(request.report_start_at).date()
+    end_date = datetime.fromisoformat(request.report_end_at).date()
+    cursor = start_date
+    while cursor <= end_date:
+        report_dates.append(cursor.isoformat())
+        cursor = cursor.fromordinal(cursor.toordinal() + 1)
+    if not report_dates:
+        report_dates = [request.report_start_at]
+    day_labels = [
+        f"{datetime.fromisoformat(d).strftime('%A')}\n{datetime.fromisoformat(d).strftime('%d/%m/%Y')}"
+        for d in report_dates
+    ]
+
+    county_rows_for_fallback = _build_rows_from_daily(open_meteo_daily or {}, report_dates, day_labels)
+
+    marine_daily_wind = {}
+    for idx, label in enumerate(day_labels, start=1):
+        marine_daily_wind[f"Day {idx}"] = county_rows_for_fallback.get(label, {}).get("Winds", "N/A")
+
+    subcounty_ward_map = _load_subcounty_ward_map(
+        supabase_admin=supabase_admin,
+        county_name=request.county_name,
+        bucket_name=BUCKET_NAME,
+    )
+    sub_counties_payload: List[Dict[str, Any]] = []
+    if subcounty_ward_map:
+        for idx, sub in enumerate(subcounty_ward_map, start=1):
+            centroid = sub.get("centroid") or {}
+            lat = centroid.get("lat")
+            lon = centroid.get("lon")
+            sub_daily = {}
+            if isinstance(lat, (float, int)) and isinstance(lon, (float, int)):
+                try:
+                    sub_daily = fetch_daily_forecast(
+                        latitude=float(lat),
+                        longitude=float(lon),
+                        report_start_at=request.report_start_at,
+                        report_end_at=request.report_end_at,
+                    )
+                except Exception as e:
+                    print(f"⚠️ Open-Meteo fetch failed for sub-county {sub['sub_county']}: {e}")
+
+            sub_rows = _build_rows_from_daily(sub_daily or open_meteo_daily or {}, report_dates, day_labels)
+            wards_phrase = _format_wards_phrase(sub.get("wards", []))
+            sub_counties_payload.append(
+                {
+                    "title": f"Table {idx}: {sub['sub_county']} Sub-County; {wards_phrase}.",
+                    "days": day_labels,
+                    "forecast": sub_rows,
+                }
+            )
+    else:
+        sub_counties_payload = [
+            {
+                "title": request.county_name,
+                "days": day_labels,
+                "forecast": county_rows_for_fallback,
+            }
+        ]
 
     data = {
         "meta": {
@@ -1061,35 +1900,9 @@ async def generate_report(
             "issue_date": issue_date,
             "period": period_str,
         },
-        # A single generic "County" section with placeholder content
-        "sub_counties": [
-            {
-                "title": request.county_name,
-                "days": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
-                "forecast": {
-                    day: {
-                        "Morning": "No detailed forecast available.",
-                        "Afternoon": "No detailed forecast available.",
-                        "Night": "No detailed forecast available.",
-                        "Rainfall distribution": "Refer to generated maps where available.",
-                        "Maximum temperature": "Data not yet synthesized.",
-                        "Minimum temperature": "Data not yet synthesized.",
-                        "Winds": "Data not yet synthesized.",
-                    }
-                    for day in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-                },
-            }
-        ],
+        "sub_counties": sub_counties_payload,
         "marine": {
-            "daily_wind": {
-                "Day 1": "N/A",
-                "Day 2": "N/A",
-                "Day 3": "N/A",
-                "Day 4": "N/A",
-                "Day 5": "N/A",
-                "Day 6": "N/A",
-                "Day 7": "N/A",
-            }
+            "daily_wind": marine_daily_wind
         },
     }
 
@@ -1140,14 +1953,12 @@ async def generate_report(
         )
 
     try:
-        append_workflow_log(
-            supabase_admin,
-            workflow_status_id,
-            stage="generate_pdf",
-            status="info",
-            message="Generating PDF document",
+        add_stage(
+            "pdf_generation",
+            "in_progress",
+            "Generating PDF document",
+            log_stage="generate_pdf",
         )
-        add_stage("pdf_generation", "in_progress", "Generating PDF document")
         print(f"📝 Generating PDF at: {output_path}")
         generate_weekly_forecast_pdf(
             data=data,
@@ -1157,23 +1968,19 @@ async def generate_report(
             signoff=signoff,
         )
         print("✅ PDF generation complete")
-        add_stage("pdf_generation", "completed", "PDF document generated")
-        append_workflow_log(
-            supabase_admin,
-            workflow_status_id,
-            stage="generate_pdf",
-            status="success",
-            message="PDF document generated",
+        add_stage(
+            "pdf_generation",
+            "completed",
+            "PDF document generated",
+            log_stage="generate_pdf",
         )
     except Exception as e:
         print(f"❌ Failed to generate PDF: {e}")
-        add_stage("pdf_generation", "failed", "Failed to generate report PDF")
-        append_workflow_log(
-            supabase_admin,
-            workflow_status_id,
-            stage="generate_pdf",
-            status="error",
-            message="Failed to generate PDF document",
+        add_stage(
+            "pdf_generation",
+            "failed",
+            "Failed to generate report PDF",
+            log_stage="generate_pdf",
         )
         raise HTTPException(status_code=500, detail="Failed to generate report PDF")
 
@@ -1181,16 +1988,60 @@ async def generate_report(
     # 5. Upload PDF to Supabase Storage and create DB record
     # ------------------------------------------------------------------
     try:
-        append_workflow_log(
-            supabase_admin,
-            workflow_status_id,
-            stage="store_report",
-            status="info",
-            message="Uploading generated report and saving metadata",
+        add_stage(
+            "storage_upload",
+            "in_progress",
+            "Uploading generated PDF to storage",
+            log_stage="store_report",
         )
-        add_stage("storage_upload", "in_progress", "Uploading generated PDF to storage")
         with open(output_path, "rb") as f:
             pdf_bytes = f.read()
+
+        resolved_observation_file_id = observation_file_id
+        if not resolved_observation_file_id:
+            add_stage(
+                "observation_persist",
+                "in_progress",
+                "Persisting auto-fetched observation data for report linkage",
+                workflow_flags={"uploaded": True, "aggregated": True},
+            )
+            obs_timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            auto_upload_id = str(uuid.uuid4())
+            auto_file_name = (
+                observation_label
+                if observation_label.endswith(".csv")
+                else f"auto_observation_{request.week_number}_{request.year}.csv"
+            )
+            auto_storage_path = (
+                f"users/{user_id}/observations/"
+                f"auto_{request.week_number}_{request.year}_{obs_timestamp}.csv"
+            )
+            supabase_admin.storage.from_(BUCKET_NAME).upload(
+                path=auto_storage_path,
+                file=observation_bytes,
+                file_options={"content-type": "text/csv"},
+            )
+            supabase_admin.table("uploads").insert(
+                {
+                    "id": auto_upload_id,
+                    "user_id": user_id,
+                    "file_name": auto_file_name,
+                    "file_path": auto_storage_path,
+                    "file_type": "observations",
+                    "status": "auto_fetched",
+                    "report_week": request.week_number,
+                    "report_year": request.year,
+                    "report_start_at": request.report_start_at,
+                    "report_end_at": request.report_end_at,
+                }
+            ).execute()
+            resolved_observation_file_id = auto_upload_id
+            add_stage(
+                "observation_persist",
+                "completed",
+                "Auto-fetched observation data persisted and linked",
+                workflow_flags={"observation_file_id": resolved_observation_file_id},
+            )
 
         timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
         storage_path = (
@@ -1210,7 +2061,7 @@ async def generate_report(
 
         report_record = {
             "user_id": user_id,
-            "observation_file_id": obs.get("id"),
+            "observation_file_id": resolved_observation_file_id,
             "template_file_id": None,
             "status": "success",
             "file_path": file_path,
@@ -1236,30 +2087,17 @@ async def generate_report(
             "storage_upload",
             "completed",
             "PDF uploaded and report record created",
+            workflow_flags={
+                "generated": True,
+                "completed": True,
+                "generated_report_id": report_id,
+            },
+            log_stage="store_report",
         )
-        if workflow_status_id is not None:
-            update_workflow_status_flags(
-                supabase_admin=supabase_admin,
-                workflow_status_id=workflow_status_id,
-                flags={
-                    "generated": True,
-                    "completed": True,
-                    "generated_report_id": report_id,
-                },
-            )
-        append_workflow_log(
-            supabase_admin,
-            workflow_status_id,
-            stage="store_report",
-            status="success",
-            message="Report metadata saved successfully",
-        )
-        append_workflow_log(
-            supabase_admin,
-            workflow_status_id,
-            stage="workflow_complete",
-            status="success",
-            message="Workflow completed successfully",
+        add_stage(
+            "workflow_complete",
+            "success",
+            "Workflow completed successfully",
         )
 
     except Exception as e:
@@ -1268,13 +2106,8 @@ async def generate_report(
             "storage_upload",
             "failed",
             "Failed to store generated report",
-        )
-        append_workflow_log(
-            supabase_admin,
-            workflow_status_id,
-            stage="store_report",
-            status="error",
-            message="Failed to store report metadata",
+            workflow_flags={"generated": False, "completed": False},
+            log_stage="store_report",
         )
         raise HTTPException(status_code=500, detail="Failed to store generated report")
     finally:
@@ -1291,7 +2124,12 @@ async def generate_report(
     print("\n" + "=" * 60)
     print("✅ REPORT GENERATION COMPLETE")
     print("=" * 60 + "\n")
-    add_stage("report_generation", "completed", "Step 4 completed successfully")
+    add_stage(
+        "report_generation",
+        "completed",
+        "Step 4 completed successfully",
+        workflow_flags={"generated": True, "completed": True},
+    )
 
     return ReportGenerationResponse(
         pdf_url=pdf_url,

@@ -8,10 +8,8 @@ import { ReportService } from "@/lib/services/reportService"
 import { useAuth } from "@/hooks/useAuth"
 import type { ReportArchiveItem } from "@/lib/models/report"
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL
-
 interface ReportArchiveProps {
-  onSelectCounty: (county: string) => void
+  onSelectCounty: (county: string, reportId?: string) => void
 }
 
 const REPORTS_CACHE_KEY = "report_archive_cache_v1"
@@ -31,6 +29,7 @@ export function ReportArchive({ onSelectCounty }: ReportArchiveProps) {
 
   const [reports, setReports] = useState<ReportArchiveItem[]>(() => getCachedReports() || [])
   const [loading, setLoading] = useState(() => !getCachedReports())
+  const [actionError, setActionError] = useState("")
 
   const [filterCounty, setFilterCounty] = useState("")
   const [filterStatus, setFilterStatus] = useState("")
@@ -209,7 +208,10 @@ export function ReportArchive({ onSelectCounty }: ReportArchiveProps) {
                       <motion.button
                         whileHover={{ scale: 1.05 }}
                         whileTap={{ scale: 0.95 }}
-                        onClick={() => onSelectCounty(report.county)}
+                        onClick={() => {
+                          setActionError("")
+                          onSelectCounty(report.county, report.id)
+                        }}
                         className="text-primary hover:text-primary/80 text-xs font-medium"
                       >
                         View
@@ -218,10 +220,14 @@ export function ReportArchive({ onSelectCounty }: ReportArchiveProps) {
                       <motion.button
                         whileHover={{ scale: 1.05 }}
                         whileTap={{ scale: 0.95 }}
-                        onClick={() => {
+                        onClick={async () => {
                           if (!token) return
-                          // prepend API_BASE for download
-                          window.open(`${API_BASE}${report.pdfUrl}`, "_blank")
+                          try {
+                            setActionError("")
+                            await ReportService.downloadReport(token, report.id)
+                          } catch (e: any) {
+                            setActionError(e?.message || "Failed to download report")
+                          }
                         }}
                         className="text-primary hover:text-primary/80 text-xs font-medium"
                       >
@@ -242,6 +248,11 @@ export function ReportArchive({ onSelectCounty }: ReportArchiveProps) {
             </tbody>
           </table>
         </div>
+        {actionError && (
+          <div className="border-t border-border px-4 py-3 text-sm text-red-600">
+            {actionError}
+          </div>
+        )}
       </motion.div>
     </motion.div>
   )

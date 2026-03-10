@@ -84,7 +84,7 @@ def generate_weekly_forecast_pdf(data, narration, map_path, output_path, signoff
     elements.append(Spacer(1, 12))
 
     # =========================
-    # SUB COUNTY TABLES
+    # SUB COUNTY TABLES - CHANGED SECTION
     # =========================
 
     for sub in data["sub_counties"]:
@@ -115,16 +115,37 @@ def generate_weekly_forecast_pdf(data, narration, map_path, output_path, signoff
                 row.append(sub["forecast"][day][row_name])
             table_data.append(row)
 
-        table = Table(table_data, repeatRows=1)
+        # Calculate column widths for better horizontal appearance
+        num_cols = len(sub["days"]) + 1
+        page_width = doc.width
+        # First column (row name) gets 25% width, remaining 75% split evenly among days
+        col_widths = [page_width * 0.25] + [page_width * 0.75 / (num_cols - 1)] * (num_cols - 1)
+        
+        table = Table(table_data, repeatRows=1, colWidths=col_widths)
 
         table.setStyle(TableStyle([
+            # Header row styling (light gray)
             ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+            # First column styling (light gray)
+            ('BACKGROUND', (0, 1), (0, -1), colors.lightgrey),
+            # All other cells (light green)
+            ('BACKGROUND', (1, 1), (-1, -1), colors.lightgreen),
+            
             ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('ALIGN', (1, 1), (-1, -1), 'CENTER')
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),  # Vertical center for all cells
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),    # Horizontal center for all cells
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTNAME', (0, 1), (0, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('LEFTPADDING', (0, 0), (-1, -1), 6),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
         ]))
 
         elements.append(table)
+        # Add extra vertical space after table
+        elements.append(Spacer(1, 24))  # Increased from default to 24 points
 
         elements.append(PageBreak())
 

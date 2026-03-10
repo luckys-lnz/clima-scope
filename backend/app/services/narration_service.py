@@ -12,10 +12,40 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 VARIABLE_COLUMN_ALIASES: Dict[str, List[str]] = {
-    "rainfall": ["rain", "rainfall", "precip", "precipitation", "rr"],
-    "tmin": ["tmin", "min_temp", "minimum_temperature", "tn"],
-    "tmax": ["tmax", "max_temp", "maximum_temperature", "tx"],
-    "wind": ["wind", "wind_speed", "windspeed", "ff"],
+    "rainfall": [
+        "rain",
+        "rainfall",
+        "precip",
+        "precipitation",
+        "precipitation_sum",
+        "rr",
+        "rain_mm",
+    ],
+    "tmin": [
+        "tmin",
+        "min_temp",
+        "minimum_temperature",
+        "temperature_2m_min",
+        "temp_min",
+        "tn",
+    ],
+    "tmax": [
+        "tmax",
+        "max_temp",
+        "maximum_temperature",
+        "temperature_2m_max",
+        "temp_max",
+        "tx",
+    ],
+    "wind": [
+        "wind",
+        "wind_speed",
+        "windspeed",
+        "wind_speed_10m_max",
+        "wind_gusts_10m_max",
+        "gust",
+        "ff",
+    ],
     "humidity": ["humidity", "rh", "relative_humidity"],
     "pressure": ["pressure", "pres", "atmospheric_pressure"],
 }

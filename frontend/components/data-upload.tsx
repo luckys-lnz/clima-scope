@@ -96,6 +96,17 @@ export function DataUpload({ onBack }: DataUploadProps) {
           </p>
         </div>
 
+        {!window && (
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4">
+            <p className="text-sm text-amber-700 font-medium">
+              Upload is available on Monday only.
+            </p>
+            <p className="text-xs text-amber-700/90 mt-1">
+              Reporting period is fixed to Tuesday through next Monday.
+            </p>
+          </div>
+        )}
+
         {/* COMBINED REPORTING PERIOD + FILE UPLOAD */}
         {window && (
           <div className="bg-black rounded-lg border border-gray-700 p-6 text-white space-y-4">

@@ -35,6 +35,8 @@ class ValidationResponse(BaseModel):
     report_period: ReportPeriod
     column_count: int
     row_count: int
+    prepared_observation_csv_path: Optional[str] = None
+    prepared_map_csv_path: Optional[str] = None
 
 
 # ============================================

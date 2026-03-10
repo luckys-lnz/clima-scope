@@ -6,9 +6,13 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap, BoundaryNorm
+from matplotlib.lines import Line2D
 import io
 from datetime import datetime, timedelta
+from datetime import date as date_cls
 import logging
+import httpx
+from shapely.geometry import Point
 
 logger = logging.getLogger(__name__)
 
@@ -310,3 +314,306 @@ def create_weather_map(
     print(f"\n✅ Map created: {filename} ({img_buffer.getbuffer().nbytes} bytes)")
     
     return img_buffer.getvalue(), filename
+
+
+def _resolve_column(columns, candidates, allow_contains=True):
+    lower_to_original = {str(col).strip().lower(): str(col) for col in columns}
+    for candidate in candidates:
+        key = candidate.lower()
+        if key in lower_to_original:
+            return lower_to_original[key]
+
+    if allow_contains:
+        for candidate in candidates:
+            key = candidate.lower()
+            for lower_name, original in lower_to_original.items():
+                if key in lower_name:
+                    return original
+    return None
+
+
+def _extract_station_frame(df: pd.DataFrame) -> pd.DataFrame:
+    lat_col = _resolve_column(df.columns, ["lat", "latitude", "y"])
+    lon_col = _resolve_column(df.columns, ["lon", "lng", "long", "longitude", "x"])
+    rain_col = _resolve_column(
+        df.columns,
+        ["rainfall", "rain", "precipitation", "precip", "rr", "ond_2025"],
+    )
+    station_col = _resolve_column(df.columns, ["station", "station_name", "name", "code"])
+
+    if not lat_col or not lon_col or not rain_col:
+        raise ValueError(
+            "Observation CSV must contain latitude, longitude, and rainfall columns."
+        )
+
+    stations = df[[lat_col, lon_col, rain_col]].copy()
+    stations.columns = ["lat", "lon", "observed_rainfall"]
+
+    if station_col:
+        stations["station_name"] = df[station_col].astype(str)
+    else:
+        stations["station_name"] = [f"Station {i+1}" for i in range(len(stations))]
+
+    stations["lat"] = pd.to_numeric(stations["lat"], errors="coerce")
+    stations["lon"] = pd.to_numeric(stations["lon"], errors="coerce")
+    stations["observed_rainfall"] = pd.to_numeric(stations["observed_rainfall"], errors="coerce")
+    stations = stations.dropna(subset=["lat", "lon", "observed_rainfall"]).copy()
+
+    if stations.empty:
+        raise ValueError("No valid station rows after parsing latitude/longitude/rainfall.")
+    return stations
+
+
+def _idw_interpolate(stations: pd.DataFrame, grid_x: np.ndarray, grid_y: np.ndarray) -> np.ndarray:
+    station_lon = stations["lon"].to_numpy()
+    station_lat = stations["lat"].to_numpy()
+    station_values = stations["blended_rainfall"].to_numpy()
+
+    interpolated = np.zeros_like(grid_x, dtype=float)
+    for i in range(grid_x.shape[0]):
+        gx = grid_x[i, :]
+        gy = grid_y[i, :]
+        dx = gx[:, None] - station_lon[None, :]
+        dy = gy[:, None] - station_lat[None, :]
+        dist2 = dx * dx + dy * dy
+        dist2 = np.where(dist2 < 1e-12, 1e-12, dist2)
+        weights = 1.0 / dist2
+        interpolated[i, :] = (weights * station_values[None, :]).sum(axis=1) / weights.sum(axis=1)
+    return interpolated
+
+
+def _add_scale_bar(ax, bounds):
+    lon_min, lat_min, lon_max, lat_max = bounds
+    mid_lat = (lat_min + lat_max) / 2.0
+    km_per_deg_lon = 111.32 * np.cos(np.radians(mid_lat))
+    if km_per_deg_lon <= 0:
+        return
+
+    width_km = (lon_max - lon_min) * km_per_deg_lon
+    scale_km = 20 if width_km > 70 else 10
+    scale_deg = scale_km / km_per_deg_lon
+
+    x0 = lon_min + (lon_max - lon_min) * 0.06
+    y0 = lat_min + (lat_max - lat_min) * 0.05
+    ax.plot([x0, x0 + scale_deg], [y0, y0], color="black", linewidth=3, solid_capstyle="butt")
+    ax.text(x0 + scale_deg / 2, y0 + (lat_max - lat_min) * 0.02, f"{scale_km} km", ha="center", fontsize=9)
+
+
+def _add_north_arrow(ax, bounds):
+    lon_min, lat_min, lon_max, lat_max = bounds
+    x = lon_max - (lon_max - lon_min) * 0.06
+    y = lat_max - (lat_max - lat_min) * 0.08
+    arrow_len = (lat_max - lat_min) * 0.08
+    ax.annotate(
+        "N",
+        xy=(x, y),
+        xytext=(x, y - arrow_len),
+        ha="center",
+        va="center",
+        fontsize=11,
+        fontweight="bold",
+        arrowprops=dict(facecolor="black", width=2, headwidth=10),
+    )
+
+
+def _fetch_open_meteo_station_rainfall(lat, lon, report_start_at, report_end_at):
+    params = {
+        "latitude": round(float(lat), 6),
+        "longitude": round(float(lon), 6),
+        "daily": "precipitation_sum",
+        "start_date": report_start_at,
+        "end_date": report_end_at,
+        "timezone": "Africa/Nairobi",
+    }
+    response = httpx.get("https://api.open-meteo.com/v1/forecast", params=params, timeout=20.0)
+    response.raise_for_status()
+    payload = response.json()
+    daily = payload.get("daily", {})
+    values = daily.get("precipitation_sum", [])
+    if not values:
+        return np.nan
+    numeric = pd.to_numeric(pd.Series(values), errors="coerce").dropna()
+    if numeric.empty:
+        return np.nan
+    return float(numeric.sum())
+
+
+def create_reliable_rainfall_map(
+    county_name: str,
+    data_file: str,
+    shapefile_path: str,
+    report_start_at: str,
+    report_end_at: str,
+    title_period_label: str = "OND 2025",
+):
+    """
+    Create a rainfall map that blends station observations with Open-Meteo forecast totals.
+    Includes county/sub-county/ward boundaries, ward labels, station points, interpolated
+    rainfall surface, legend, scale bar, north arrow, and map title.
+    """
+    _ = date_cls.fromisoformat(report_start_at)
+    _ = date_cls.fromisoformat(report_end_at)
+
+    observations = pd.read_csv(data_file)
+    stations = _extract_station_frame(observations)
+    wards = gpd.read_file(shapefile_path)
+
+    county_col = _resolve_column(wards.columns, ["county", "county_name", "adm1_name"])
+    ward_col = _resolve_column(wards.columns, ["ward", "ward_name", "adm3_name", "name"])
+    subcounty_col = _resolve_column(
+        wards.columns,
+        ["sub_county", "subcounty", "const", "constituency", "adm2_name"],
+    )
+
+    if county_name and county_col:
+        county_wards = wards[
+            wards[county_col].astype(str).str.strip().str.lower() == county_name.strip().lower()
+        ].copy()
+    else:
+        county_wards = wards.copy()
+
+    if county_wards.empty:
+        raise ValueError(f"County '{county_name}' not found in shapefile")
+
+    county_boundary = county_wards.dissolve()
+    county_polygon = county_boundary.geometry.unary_union
+    station_points = gpd.GeoDataFrame(
+        stations,
+        geometry=gpd.points_from_xy(stations["lon"], stations["lat"]),
+        crs=county_wards.crs,
+    )
+    stations_in_county = station_points[station_points.geometry.within(county_polygon)].copy()
+    if stations_in_county.empty:
+        stations_in_county = station_points.copy()
+
+    forecast_values = []
+    for _, row in stations_in_county.iterrows():
+        try:
+            forecast_values.append(
+                _fetch_open_meteo_station_rainfall(
+                    lat=row["lat"],
+                    lon=row["lon"],
+                    report_start_at=report_start_at,
+                    report_end_at=report_end_at,
+                )
+            )
+        except Exception as exc:
+            logger.warning("station_open_meteo_fetch_failed", extra={"error": str(exc)})
+            forecast_values.append(np.nan)
+
+    stations_in_county["forecast_rainfall"] = forecast_values
+    forecast_available = stations_in_county["forecast_rainfall"].notna().any()
+    if forecast_available:
+        obs_median = float(stations_in_county["observed_rainfall"].median())
+        forecast_median = float(stations_in_county["forecast_rainfall"].median(skipna=True))
+        ratio = (obs_median / forecast_median) if forecast_median > 0 else 999.0
+        forecast_weight = 0.2 if ratio > 3.0 else 0.35
+        stations_in_county["blended_rainfall"] = (
+            stations_in_county["observed_rainfall"] * (1.0 - forecast_weight)
+            + stations_in_county["forecast_rainfall"].fillna(stations_in_county["observed_rainfall"])
+            * forecast_weight
+        )
+    else:
+        stations_in_county["blended_rainfall"] = stations_in_county["observed_rainfall"]
+
+    bounds = county_wards.total_bounds
+    lon_min, lat_min, lon_max, lat_max = bounds
+    width = lon_max - lon_min
+    height = lat_max - lat_min
+    margin = max(width, height) * 0.05
+    lon_lin = np.linspace(lon_min - margin, lon_max + margin, 220)
+    lat_lin = np.linspace(lat_min - margin, lat_max + margin, 220)
+    grid_x, grid_y = np.meshgrid(lon_lin, lat_lin)
+    grid_z = _idw_interpolate(stations_in_county, grid_x, grid_y)
+
+    inside_mask = np.array(
+        [county_polygon.contains(Point(x, y)) for x, y in zip(grid_x.ravel(), grid_y.ravel())]
+    ).reshape(grid_x.shape)
+    grid_z = np.where(inside_mask, grid_z, np.nan)
+
+    fig, ax = plt.subplots(figsize=(14, 14))
+    thresholds = [0, 10, 20, 30, 40, 60, 80, 100, 130, 160, 200, 260]
+    cmap = ListedColormap(
+        [
+            "#edf8fb", "#ccece6", "#99d8c9", "#66c2a4", "#41ae76",
+            "#238b45", "#006d2c", "#fef0d9", "#fdcc8a", "#fc8d59", "#d7301f",
+        ]
+    )
+    norm = BoundaryNorm(thresholds, cmap.N)
+
+    contour = ax.contourf(
+        grid_x,
+        grid_y,
+        grid_z,
+        levels=thresholds,
+        cmap=cmap,
+        norm=norm,
+        alpha=0.9,
+        extend="max",
+    )
+
+    county_boundary.boundary.plot(ax=ax, color="black", linewidth=1.8, zorder=4)
+    if subcounty_col:
+        county_wards.dissolve(by=subcounty_col).boundary.plot(
+            ax=ax, color="#303030", linewidth=1.1, zorder=4
+        )
+    county_wards.boundary.plot(ax=ax, color="#0b5ed7", linewidth=0.6, linestyle=":", zorder=4)
+
+    max_labels = 40
+    if ward_col:
+        for _, row in county_wards.head(max_labels).iterrows():
+            centroid = row.geometry.representative_point()
+            label = str(row[ward_col])[:28]
+            ax.text(centroid.x, centroid.y, label, fontsize=6, color="#0b1f33", ha="center", zorder=5)
+
+    ax.scatter(
+        stations_in_county["lon"],
+        stations_in_county["lat"],
+        s=36,
+        color="black",
+        edgecolor="white",
+        linewidth=0.5,
+        zorder=6,
+        label="Rainfall station",
+    )
+
+    station_legend = [
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="black",
+            label="Rainfall station",
+            markerfacecolor="black",
+            markersize=7,
+            linestyle="None",
+        )
+    ]
+    ax.legend(handles=station_legend, loc="lower left", frameon=True, fontsize=9)
+
+    cbar = fig.colorbar(contour, ax=ax, orientation="horizontal", fraction=0.045, pad=0.04)
+    cbar.set_label("Rainfall (mm)", fontsize=10, fontweight="bold")
+
+    _add_scale_bar(ax, (lon_min, lat_min, lon_max, lat_max))
+    _add_north_arrow(ax, (lon_min, lat_min, lon_max, lat_max))
+
+    title = (
+        f"{county_name} County Rainfall Map\n"
+        f"Interpolated Rainfall Surface ({title_period_label})"
+    )
+    ax.set_title(title, fontsize=14, fontweight="bold", pad=16)
+    ax.set_xlabel("Longitude")
+    ax.set_ylabel("Latitude")
+    ax.set_xlim(lon_min - margin, lon_max + margin)
+    ax.set_ylim(lat_min - margin, lat_max + margin)
+    ax.set_aspect("equal")
+
+    fig.tight_layout()
+    buffer = io.BytesIO()
+    plt.savefig(buffer, format="png", dpi=300, facecolor="white")
+    plt.close(fig)
+    buffer.seek(0)
+
+    stamp = datetime.utcnow().strftime("%Y%m%d")
+    filename = f"{county_name.replace(' ', '_').lower()}_reliable_rainfall_{stamp}.png"
+    return buffer.getvalue(), filename

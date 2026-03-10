@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { ChevronLeft, Download, RefreshCw } from "lucide-react"
 import { motion } from "framer-motion"
 import { LogViewer } from "@/components/log-viewer"
@@ -10,11 +10,14 @@ import {
 } from "@/lib/utils/report_date"
 import { authService } from "@/lib/services/authService"
 import { workflowService } from "@/lib/services/workflowService"
+import { ReportService } from "@/lib/services/reportService"
 import type { ValidationResponse, MapOutput } from "@/lib/models/workflow"
 
 interface ManualGenerationProps {
   onBack: () => void
 }
+
+const REPORT_JOB_ACTIVE_KEY = "report_job_active"
 
 export function ManualGeneration({ onBack }: ManualGenerationProps) {
   // ===== WORKFLOW STATE =====
@@ -31,8 +34,10 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
   const [isGenerating, setIsGenerating] = useState(false)
   const [isComplete, setIsComplete] = useState(false)
   const [downloadUrl, setDownloadUrl] = useState("")
+  const [downloadReportId, setDownloadReportId] = useState("")
   const [errorMessage, setErrorMessage] = useState("")
   const [sessionToken, setSessionToken] = useState<string | null>(null)
+  const reportPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const reportWindow = getCurrentWeeklyReportWindow()
 
@@ -49,6 +54,12 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
         setSessionToken(session.access_token)
       }
     })
+    return () => {
+      if (reportPollRef.current) {
+        clearInterval(reportPollRef.current)
+        reportPollRef.current = null
+      }
+    }
   }, [])
 
   // ===== LOG HELPER =====
@@ -59,7 +70,7 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
     ])
   }
 
-  // ===== STEP 1: VALIDATE DATA =====
+  // ===== STEP 1: PREPARE DATA + CSV ARTIFACTS =====
   const handleValidate = async () => {
     if (!sessionToken) {
       setErrorMessage("No active session")
@@ -71,7 +82,7 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
       return
     }
 
-    addLog(`Stage 1: Checking observation for Week ${reportWindow.week}, ${reportWindow.year}…`)
+    addLog(`Stage 1: Aggregating and preparing CSVs for Week ${reportWindow.week}, ${reportWindow.year}…`)
     setIsGenerating(true)
     setErrorMessage("")
 
@@ -91,10 +102,16 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
       setStep(2)
 
       addLog(`✓ Files found: ${result.observation_file}, ${result.shapefile}`)
-      addLog(`✓ Variables detected: ${result.variables.join(", ")}`)
+      addLog(`✓ Map variables ready: ${result.variables.join(", ")}`)
       addLog(`✓ Report period: Week ${result.report_week}, ${result.report_year}`)
       addLog(`✓ Period dates: ${result.report_period.start} to ${result.report_period.end}`)
       addLog(`✓ File stats: ${result.row_count} rows, ${result.column_count} columns`)
+      if (result.prepared_observation_csv_path) {
+        addLog(`✓ Prepared station CSV saved: ${result.prepared_observation_csv_path}`)
+      }
+      if (result.prepared_map_csv_path) {
+        addLog(`✓ Prepared map CSV saved: ${result.prepared_map_csv_path}`)
+      }
       addLog("Stage 1 complete")
     } catch (e: any) {
       const errorMsg = e.message || "Validation failed"
@@ -160,7 +177,7 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
     setErrorMessage("")
 
     try {
-      const result = await workflowService.generateReport(sessionToken, {
+      const startResult = await workflowService.generateReportAsync(sessionToken, {
         county_name: userCounty,
         week_number: reportWindow.week,
         year: reportWindow.year,
@@ -168,27 +185,74 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
         report_end_at: formatDateToISO(reportWindow.end),
         variables: selectedVars
       })
-
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-      setDownloadUrl(`${baseUrl}${result.pdf_url}`)
-
-      if (result.stage_statuses?.length) {
-        result.stage_statuses.forEach((s) => {
-          const prefix = s.status === "failed" ? "✗" : s.status === "in_progress" ? "…" : "✓"
-          addLog(`${prefix} [${s.stage}] ${s.message}`)
-        })
+      addLog(`… ${startResult.message}`)
+      addLog("… Monitoring background generation progress")
+      if (typeof window !== "undefined") {
+        sessionStorage.setItem(REPORT_JOB_ACTIVE_KEY, "true")
       }
 
-      addLog(`✓ Report generated: ${result.filename}`)
-      addLog("Workflow complete")
+      if (reportPollRef.current) {
+        clearInterval(reportPollRef.current)
+      }
+      const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
-      setIsComplete(true)
+      const pollStatus = async () => {
+        try {
+          const status = (await workflowService.getWorkflowStatus(
+            sessionToken,
+            reportWindow.week,
+            reportWindow.year
+          )) as any
+          if (!status) return
+
+          if (status.generated_report_id) {
+            const pdfPath = `/api/v1/reports/download/${status.generated_report_id}`
+            setDownloadUrl(`${baseUrl}${pdfPath}`)
+            setDownloadReportId(status.generated_report_id)
+            setIsComplete(true)
+            setIsGenerating(false)
+            addLog("✓ Report generated in background")
+            if (typeof window !== "undefined") {
+              sessionStorage.setItem(REPORT_JOB_ACTIVE_KEY, "false")
+            }
+            if (reportPollRef.current) {
+              clearInterval(reportPollRef.current)
+              reportPollRef.current = null
+            }
+            return
+          }
+
+          const latestLog = status.latest_log
+          const latestStatus = String(latestLog?.status || "").toLowerCase()
+          if (latestStatus === "error" || latestStatus === "failed") {
+            setIsGenerating(false)
+            const msg = latestLog?.message || "Background report generation failed"
+            setErrorMessage(msg)
+            addLog(`✗ ${msg}`)
+            if (typeof window !== "undefined") {
+              sessionStorage.setItem(REPORT_JOB_ACTIVE_KEY, "false")
+            }
+            if (reportPollRef.current) {
+              clearInterval(reportPollRef.current)
+              reportPollRef.current = null
+            }
+          }
+        } catch {
+          // ignore transient polling errors
+        }
+      }
+
+      reportPollRef.current = setInterval(pollStatus, 4000)
+      await pollStatus()
+
     } catch (e: any) {
       const errorMsg = e.message || "Report generation failed"
       addLog(`✗ Report generation failed: ${errorMsg}`)
       setErrorMessage(errorMsg)
-    } finally {
       setIsGenerating(false)
+      if (typeof window !== "undefined") {
+        sessionStorage.setItem(REPORT_JOB_ACTIVE_KEY, "false")
+      }
     }
   }
 
@@ -201,7 +265,15 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
     setGeneratedMaps([])
     setIsComplete(false)
     setDownloadUrl("")
+    setDownloadReportId("")
     setErrorMessage("")
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem(REPORT_JOB_ACTIVE_KEY, "false")
+    }
+    if (reportPollRef.current) {
+      clearInterval(reportPollRef.current)
+      reportPollRef.current = null
+    }
     addLog("Workflow reset")
   }
 
@@ -243,7 +315,7 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
               Step {step}/{totalSteps}
             </div>
 
-            {/* STEP 1: VALIDATE */}
+            {/* STEP 1: PREPARE INPUTS */}
             {step === 1 && (
               <>
                 <div>
@@ -267,7 +339,7 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
                   onClick={handleValidate}
                   className="w-full bg-primary text-primary-foreground py-2 rounded-lg disabled:opacity-50"
                 >
-                  {isGenerating ? "Validating..." : "Next: Validate Data"}
+                  {isGenerating ? "Preparing..." : "Next: Prepare Data"}
                 </button>
               </>
             )}
@@ -397,7 +469,7 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
             {/* Validation Summary */}
             {validationResult && step > 1 && (
               <div className="mt-4 bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
-                <p className="text-xs text-blue-600 font-medium mb-1">Validation Summary</p>
+                <p className="text-xs text-blue-600 font-medium mb-1">Preparation Summary</p>
                 <p className="text-sm">
                   <span className="font-medium">File:</span> {validationResult.observation_file}<br />
                   <span className="font-medium">Variables:</span> {validationResult.variables.join(", ")}<br />
@@ -443,15 +515,21 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
                 </div>
 
                 <div className="flex gap-3">
-                  <a
-                    href={downloadUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!sessionToken || !downloadReportId) return
+                      try {
+                        await ReportService.downloadReport(sessionToken, downloadReportId)
+                      } catch (e: any) {
+                        setErrorMessage(e?.message || "Failed to download PDF")
+                      }
+                    }}
                     className="flex-1 bg-primary text-primary-foreground py-2 px-4 rounded-lg text-sm flex items-center justify-center gap-2 hover:bg-primary/90 transition-colors"
                   >
                     <Download className="w-4 h-4" />
                     Download PDF
-                  </a>
+                  </button>
 
                   <button
                     onClick={handleGenerateReport}
