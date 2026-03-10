@@ -124,6 +124,14 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = Field(default="", env="OPENAI_API_KEY")
     ANTHROPIC_API_KEY: str = Field(default="", env="ANTHROPIC_API_KEY")
     AI_PROVIDER: str = Field(default="openai", env="AI_PROVIDER")  # openai or anthropic
+
+    # Station Data Auto Fetch (TAHMO/KMD)
+    AUTO_STATION_FETCH_ENABLED: bool = Field(default=True, env="AUTO_STATION_FETCH_ENABLED")
+    TAHMO_BASE_URL: str = Field(default="", env="TAHMO_BASE_URL")
+    TAHMO_API_KEY: str = Field(default="", env="TAHMO_API_KEY")
+    KMD_BASE_URL: str = Field(default="", env="KMD_BASE_URL")
+    KMD_API_KEY: str = Field(default="", env="KMD_API_KEY")
+    STATION_FETCH_TIMEOUT_SECONDS: int = Field(default=30, env="STATION_FETCH_TIMEOUT_SECONDS")
     
     # File Storage
     STORAGE_PATH: str = Field(

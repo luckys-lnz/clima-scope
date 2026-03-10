@@ -1,4 +1,5 @@
-import type { ReportArchiveItem } from "@/lib/models/report"
+import { ReportArchiveItem, ReportDetailResponse } from "@/lib/models/report"
+import { handleTokenExpired } from "@/lib/utils/auth"
 import { authService } from "@/lib/services/authService"
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
@@ -46,5 +47,29 @@ export class ReportService {
     a.click()
     a.remove()
     window.URL.revokeObjectURL(url)
+  }
+
+  /**
+   * Fetch detailed dynamic metadata for one generated report
+   */
+  static async getReportDetail(token: string, reportId: string): Promise<ReportDetailResponse> {
+    const accessToken = await authService.getValidAccessToken(token)
+    const res = await fetch(`${API_BASE}/api/v1/reports/detail/${reportId}`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+    })
+
+    if (res.status === 401) {
+      handleTokenExpired()
+    }
+
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({}))
+      throw new Error(error.detail || "Failed to load report detail")
+    }
+
+    return res.json()
   }
 }

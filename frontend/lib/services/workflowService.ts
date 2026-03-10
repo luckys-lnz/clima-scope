@@ -199,6 +199,55 @@ export const workflowService = {
         token,
         body: data,
       },
-    )
+      body: JSON.stringify(data)
+    })
+
+    const responseData = await response.json()
+    
+    if (!response.ok) {
+      const error = responseData as ValidationError
+      throw new Error(error.detail || "Report generation failed")
+    }
+
+    return responseData
   },
+
+  /**
+   * Step 4 (Async): Start final PDF report generation in background
+   */
+  generateReportAsync: async (
+    token: string,
+    data: {
+      county_name: string
+      week_number: number
+      year: number
+      report_start_at: string
+      report_end_at: string
+      variables: string[]
+    }
+  ): Promise<{
+    accepted: boolean
+    workflow_status_id?: number
+    report_week: number
+    report_year: number
+    message: string
+  }> => {
+    const response = await fetch(`${API_BASE}/api/v1/workflow/generate-report-async`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(data)
+    })
+
+    const responseData = await response.json()
+
+    if (!response.ok) {
+      const error = responseData as ValidationError
+      throw new Error(error.detail || "Failed to start background report generation")
+    }
+
+    return responseData
+  }
 }

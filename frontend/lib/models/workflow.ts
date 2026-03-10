@@ -20,6 +20,8 @@ export interface ValidationResponse {
     report_period: ReportPeriod
     column_count: number
     row_count: number
+    prepared_observation_csv_path?: string
+    prepared_map_csv_path?: string
 }
 
 export interface ValidationError {

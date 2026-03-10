@@ -99,11 +99,9 @@ async def get_dashboard_overview(user=Depends(get_current_user)):
         workflows_response = supabase.table("workflow_status")\
             .select(
                 "id,uploaded,aggregated,mapped,generated,completed,"
-                "report_week,report_year,updated_at"
+                "updated_at,generated_report_id"
             )\
             .eq("user_id", user_id)\
-            .eq("report_week", current_window.week)\
-            .eq("report_year", current_window.year)\
             .order("updated_at", desc=True)\
             .limit(1)\
             .execute()
@@ -135,6 +133,24 @@ async def get_dashboard_overview(user=Depends(get_current_user)):
                 )
                 if logs_response.data:
                     workflow_progress = logs_response.data[0]
+
+            # Fallback: infer step from latest log stage if flags are still all false.
+            if workflow_step is None and workflow_progress:
+                stage = str(workflow_progress.get("stage") or "").lower()
+                status = str(workflow_progress.get("status") or "").lower()
+                if stage in {"validate_inputs", "observation_context"}:
+                    workflow_step = "uploaded"
+                elif stage in {"generate_maps", "map_context"}:
+                    workflow_step = "mapped"
+                elif stage in {"generate_narration", "generate_pdf", "store_report"}:
+                    workflow_step = "generated"
+                elif stage == "report_generation" and status in {"in_progress", "info"}:
+                    workflow_step = "generated"
+                elif stage in {"workflow_complete", "report_generation"} and status in {"success", "completed"}:
+                    workflow_step = "completed"
+                else:
+                    # If we have any workflow log but flags are unset, treat process as started.
+                    workflow_step = "uploaded"
     except Exception as e:
         print(f"Error fetching workflow: {e}")
         workflow_step = None

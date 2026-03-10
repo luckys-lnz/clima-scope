@@ -16,6 +16,7 @@ import {
 import { DashboardOverview } from "@/components/ui-panels/dashboard-overview"
 import { ManualGeneration } from "@/components/ui-panels/manual-generation"
 import { ReportArchive } from "@/components/ui-panels/report-archive"
+import { CountyDetail } from "@/components/ui-panels/county-detail"
 import { SystemConfiguration } from "@/components/ui-panels/system-configuration"
 import { DataUpload } from "@/components/data-upload"
 import { authService } from "@/lib/services/authService"
@@ -57,6 +58,7 @@ export default function Dashboard() {
   const [currentScreen, setCurrentScreen] = useState<Screen>("dashboard")
   const [visitedScreens, setVisitedScreens] = useState<Screen[]>(["dashboard"])
   const [selectedCounty, setSelectedCounty] = useState<string | null>(null)
+  const [selectedReportId, setSelectedReportId] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [isLoggingOut, setIsLoggingOut] = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
@@ -243,11 +245,23 @@ export default function Dashboard() {
             )}
             {renderPanel(
               "archive",
-              <ReportArchive
-                onSelectCounty={(county) => {
-                  setSelectedCounty(county)
-                }}
-              />
+              selectedCounty ? (
+                <CountyDetail
+                  county={selectedCounty}
+                  reportId={selectedReportId || undefined}
+                  onBack={() => {
+                    setSelectedCounty(null)
+                    setSelectedReportId(null)
+                  }}
+                />
+              ) : (
+                <ReportArchive
+                  onSelectCounty={(county, reportId) => {
+                    setSelectedCounty(county)
+                    setSelectedReportId(reportId || null)
+                  }}
+                />
+              )
             )}
             {renderPanel(
               "config",

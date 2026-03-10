@@ -19,6 +19,7 @@ interface DashboardOverviewProps {
 }
 
 const DASHBOARD_CACHE_KEY = "dashboard_overview_cache_v1"
+const REPORT_JOB_ACTIVE_KEY = "report_job_active"
 
 export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
   const getCachedData = (): DashboardOverviewData | null => {
@@ -44,20 +45,26 @@ export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
       return
     }
 
-    async function fetchDashboard() {
+    let cancelled = false
+    let pollHandle: ReturnType<typeof setInterval> | null = null
+
+    async function fetchDashboard(isInitial = false) {
       try {
         // Only show blocking loader if we have no cached data.
-        if (!data) setLoading(true)
+        if (isInitial && !data) setLoading(true)
 
         const result = await DashboardService.getOverview(token)
+        if (cancelled) return
         setData(result)
         sessionStorage.setItem(DASHBOARD_CACHE_KEY, JSON.stringify(result))
+        setError(null)
       } catch (e: any) {
+        if (cancelled) return
         if (!data) {
           setError(e.message || "Error")
         }
       } finally {
-        if (!data) setLoading(false)
+        if (isInitial && !data) setLoading(false)
       }
     }
 
@@ -65,17 +72,37 @@ export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
       setLoading(false)
     }
 
-    fetchDashboard()
+    fetchDashboard(true)
+
+    const isJobActive = typeof window !== "undefined" &&
+      sessionStorage.getItem(REPORT_JOB_ACTIVE_KEY) === "true"
+    if (isJobActive) {
+      // Poll only when a background report job is active.
+      pollHandle = setInterval(() => {
+        fetchDashboard(false)
+      }, 5000)
+    }
+
+    return () => {
+      cancelled = true
+      if (pollHandle) clearInterval(pollHandle)
+    }
   }, [token, authLoading])
 
   if (loading) return <div className="p-6">Loading dashboard…</div>
   if (error || !data) return <div className="p-6 text-red-500">{error || "No data"}</div>
 
   const { stats, workflow_step, workflow_progress: workflowProgress } = data
+  if (typeof window !== "undefined") {
+    const latestStatus = String(workflowProgress?.status || "").toLowerCase()
+    if (workflow_step === "completed" || latestStatus === "error" || latestStatus === "failed") {
+      sessionStorage.setItem(REPORT_JOB_ACTIVE_KEY, "false")
+    }
+  }
   const currentWindowText = `Week ${data.current_window.week}, ${data.current_window.year} (${data.current_window.start} to ${data.current_window.end})`
 
   const steps = [
-    { key: "uploaded", label: "Upload Observation Data" },
+    { key: "uploaded", label: "Historical Station Data" },
     { key: "aggregated", label: "Spatial Aggregation" },
     { key: "mapped", label: "Generate Map" },
     { key: "generated", label: "Generate Report" },
