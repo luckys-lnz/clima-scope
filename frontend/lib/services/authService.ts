@@ -1,206 +1,416 @@
-// app/services/authService.ts
 "use client"
 
-import type { 
-  SignUpData, 
-  LoginData, 
-  User 
-} from "@/lib/models/auth"
+import type { LoginData, SignUpData, User } from "@/lib/models/auth"
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 const DASHBOARD_CACHE_KEY = "dashboard_overview_cache_v1"
 const REPORTS_CACHE_KEY = "report_archive_cache_v1"
 const SETTINGS_CACHE_KEY = "system_settings_cache"
+const TOKEN_REFRESH_LEEWAY_MS = 60_000
+export const AUTH_STATE_EVENT = "clima:auth-state-changed"
+
+const STORAGE_KEYS = {
+  accessToken: "access_token",
+  refreshToken: "refresh_token",
+  user: "user",
+} as const
+
+type CacheKey =
+  | typeof DASHBOARD_CACHE_KEY
+  | typeof REPORTS_CACHE_KEY
+  | typeof SETTINGS_CACHE_KEY
+
+interface JwtPayload {
+  exp?: number
+}
+
+interface ApiErrorBody {
+  detail?: string
+  message?: string
+}
 
 export interface LoginResponse {
   user: User
   access_token: string
-  refresh_token: string  // ← ADD THIS
+  refresh_token: string
   expires_in: number
 }
 
 export interface RefreshResponse {
   access_token: string
-  refresh_token: string  // ← ADD THIS
+  refresh_token: string
   expires_in: number
 }
 
 export interface Session {
   user: User
   access_token: string
-  refresh_token: string  // ← ADD THIS
+  refresh_token: string
+}
+
+export type AuthStateEventType = "session_updated" | "session_cleared"
+
+export interface AuthStateEventDetail {
+  type: AuthStateEventType
+  access_token: string | null
+  refresh_token: string | null
+  user: User | null
+}
+
+export interface AuthFetchOptions extends Omit<RequestInit, "headers"> {
+  headers?: HeadersInit
+  token?: string | null
+  retryOnUnauthorized?: boolean
+}
+
+export interface JsonAuthRequestOptions<TBody>
+  extends Omit<AuthFetchOptions, "body"> {
+  body?: TBody
+}
+
+let refreshInFlight: Promise<RefreshResponse> | null = null
+
+const clearCacheEntries = (keys: readonly CacheKey[]): void => {
+  if (typeof window === "undefined") return
+  keys.forEach((key) => sessionStorage.removeItem(key))
+}
+
+const emitAuthState = (detail: AuthStateEventDetail): void => {
+  if (typeof window === "undefined") return
+  window.dispatchEvent(
+    new CustomEvent<AuthStateEventDetail>(AUTH_STATE_EVENT, { detail }),
+  )
+}
+
+const setSession = (
+  accessToken: string,
+  refreshToken: string,
+  user?: User,
+): void => {
+  if (typeof window === "undefined") return
+  localStorage.setItem(STORAGE_KEYS.accessToken, accessToken)
+  localStorage.setItem(STORAGE_KEYS.refreshToken, refreshToken)
+  if (user) {
+    localStorage.setItem(STORAGE_KEYS.user, JSON.stringify(user))
+  }
+  const resolvedUser = user ?? getStoredUser()
+  emitAuthState({
+    type: "session_updated",
+    access_token: accessToken,
+    refresh_token: refreshToken,
+    user: resolvedUser,
+  })
+}
+
+const getStoredAccessToken = (): string | null =>
+  typeof window === "undefined"
+    ? null
+    : localStorage.getItem(STORAGE_KEYS.accessToken)
+
+const getStoredRefreshToken = (): string | null =>
+  typeof window === "undefined"
+    ? null
+    : localStorage.getItem(STORAGE_KEYS.refreshToken)
+
+const getStoredUser = (): User | null => {
+  if (typeof window === "undefined") return null
+  const raw = localStorage.getItem(STORAGE_KEYS.user)
+  if (!raw) return null
+
+  try {
+    return JSON.parse(raw) as User
+  } catch {
+    return null
+  }
+}
+
+const clearSessionStorage = (): void => {
+  if (typeof window === "undefined") return
+  localStorage.removeItem(STORAGE_KEYS.accessToken)
+  localStorage.removeItem(STORAGE_KEYS.refreshToken)
+  localStorage.removeItem(STORAGE_KEYS.user)
+  emitAuthState({
+    type: "session_cleared",
+    access_token: null,
+    refresh_token: null,
+    user: null,
+  })
+}
+
+const decodeJwtPayload = (token: string): JwtPayload | null => {
+  try {
+    const [, payloadB64 = ""] = token.split(".")
+    if (!payloadB64) return null
+    const payload = JSON.parse(atob(payloadB64)) as JwtPayload
+    return payload
+  } catch {
+    return null
+  }
+}
+
+const isTokenExpired = (token: string, leewayMs = 0): boolean => {
+  const payload = decodeJwtPayload(token)
+  if (!payload?.exp) return true
+  return payload.exp * 1000 - leewayMs <= Date.now()
+}
+
+const parseJsonSafe = async <T>(response: Response): Promise<T | null> => {
+  try {
+    return (await response.json()) as T
+  } catch {
+    return null
+  }
+}
+
+const getErrorMessage = async (
+  response: Response,
+  fallback: string,
+): Promise<string> => {
+  const body = await parseJsonSafe<ApiErrorBody>(response)
+  return body?.detail || body?.message || fallback
+}
+
+const withAuthorizationHeader = (
+  token: string,
+  headers?: HeadersInit,
+): Headers => {
+  const resolvedHeaders = new Headers(headers)
+  resolvedHeaders.set("Authorization", `Bearer ${token}`)
+  return resolvedHeaders
+}
+
+const createJsonHeaders = (headers?: HeadersInit): Headers => {
+  const resolvedHeaders = new Headers(headers)
+  if (!resolvedHeaders.has("Content-Type")) {
+    resolvedHeaders.set("Content-Type", "application/json")
+  }
+  return resolvedHeaders
+}
+
+const refreshWithToken = (refreshToken: string): Promise<RefreshResponse> => {
+  if (!refreshInFlight) {
+    refreshInFlight = (async () => {
+      const response = await fetch(`${API_BASE}/api/v1/auth/refresh`, {
+        method: "POST",
+        headers: createJsonHeaders(),
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      })
+
+      const result = await parseJsonSafe<RefreshResponse & ApiErrorBody>(response)
+      if (!response.ok || !result?.access_token || !result.refresh_token) {
+        throw new Error(result?.detail || "Session expired. Please sign in again.")
+      }
+
+      setSession(result.access_token, result.refresh_token)
+      return {
+        access_token: result.access_token,
+        refresh_token: result.refresh_token,
+        expires_in: result.expires_in,
+      }
+    })().finally(() => {
+      refreshInFlight = null
+    })
+  }
+
+  return refreshInFlight
 }
 
 export const authService = {
-  // -----------------------
-  // LOGIN - Calls your backend
-  // -----------------------
-  login: async (data: LoginData): Promise<LoginResponse> => {
+  clearSession(): void {
+    clearSessionStorage()
+    clearCacheEntries([DASHBOARD_CACHE_KEY, REPORTS_CACHE_KEY, SETTINGS_CACHE_KEY])
+  },
+
+  isTokenExpired(token: string, leewayMs = 0): boolean {
+    return isTokenExpired(token, leewayMs)
+  },
+
+  async login(data: LoginData): Promise<LoginResponse> {
     const response = await fetch(`${API_BASE}/api/v1/auth/login`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: createJsonHeaders(),
       body: JSON.stringify(data),
     })
 
-    const result = await response.json()
-    if (!response.ok) {
-      throw new Error(result.detail || "Login failed")
+    const result = await parseJsonSafe<LoginResponse & ApiErrorBody>(response)
+    if (!response.ok || !result?.access_token || !result.refresh_token || !result.user) {
+      throw new Error(result?.detail || "Login failed")
     }
 
-    // Store BOTH tokens in localStorage
-    localStorage.setItem("access_token", result.access_token)
-    localStorage.setItem("refresh_token", result.refresh_token)  // ← ADD THIS
-    localStorage.setItem("user", JSON.stringify(result.user))
-    sessionStorage.removeItem(DASHBOARD_CACHE_KEY)
-    sessionStorage.removeItem(REPORTS_CACHE_KEY)
-    sessionStorage.removeItem(SETTINGS_CACHE_KEY)
+    setSession(result.access_token, result.refresh_token, result.user)
+    clearCacheEntries([DASHBOARD_CACHE_KEY, REPORTS_CACHE_KEY, SETTINGS_CACHE_KEY])
 
-    return result
-  },
-
-  // -----------------------
-  // REFRESH TOKEN - NEW METHOD!
-  // -----------------------
-  refreshToken: async (refresh_token: string): Promise<RefreshResponse> => {
-    const response = await fetch(`${API_BASE}/api/v1/auth/refresh`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refresh_token }),
-    })
-
-    const result = await response.json()
-    if (!response.ok) {
-      throw new Error(result.detail || "Token refresh failed")
+    return {
+      user: result.user,
+      access_token: result.access_token,
+      refresh_token: result.refresh_token,
+      expires_in: result.expires_in,
     }
-
-    // Update stored tokens
-    localStorage.setItem("access_token", result.access_token)
-    localStorage.setItem("refresh_token", result.refresh_token)
-
-    return result
   },
 
-  // -----------------------
-  // SIGNUP via Backend
-  // -----------------------
-  signup: async (data: SignUpData): Promise<{ message: string }> => {
+  async refreshToken(refreshToken: string): Promise<RefreshResponse> {
+    return refreshWithToken(refreshToken)
+  },
+
+  async signup(data: SignUpData): Promise<{ message: string }> {
     const response = await fetch(`${API_BASE}/api/v1/auth/signup`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: createJsonHeaders(),
       body: JSON.stringify(data),
     })
 
-    const resData = await response.json()
+    const result = await parseJsonSafe<{ message?: string } & ApiErrorBody>(response)
     if (!response.ok) {
-      throw new Error(resData.detail || resData.message || "Signup failed")
+      throw new Error(result?.detail || result?.message || "Signup failed")
     }
 
-    return resData
+    return { message: result?.message ?? "Signup successful" }
   },
 
-  // -----------------------
-  // LOGOUT
-  // -----------------------
-  logout: async (token: string): Promise<void> => {
-    const response = await fetch(`${API_BASE}/api/v1/auth/logout`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${token}`,
-        "Content-Type": "application/json"
-      },
-    })
+  async logout(token: string): Promise<void> {
+    try {
+      const response = await fetch(`${API_BASE}/api/v1/auth/logout`, {
+        method: "POST",
+        headers: withAuthorizationHeader(token, createJsonHeaders()),
+      })
 
-    if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.detail || "Logout failed")
-    }
-
-    // Clear ALL tokens
-    localStorage.removeItem("access_token")
-    localStorage.removeItem("refresh_token")  // ← ADD THIS
-    localStorage.removeItem("user")
-    sessionStorage.removeItem(DASHBOARD_CACHE_KEY)
-    sessionStorage.removeItem(REPORTS_CACHE_KEY)
-    sessionStorage.removeItem(SETTINGS_CACHE_KEY)
-  },
-
-  // -----------------------
-  // GET CURRENT USER FROM TOKEN
-  // -----------------------
-  getCurrentUser: async (token: string): Promise<User> => {
-    const response = await fetch(`${API_BASE}/api/v1/auth/me`, {
-      headers: {
-        "Authorization": `Bearer ${token}`
+      if (!response.ok) {
+        throw new Error(await getErrorMessage(response, "Logout failed"))
       }
+    } finally {
+      authService.clearSession()
+    }
+  },
+
+  async getCurrentUser(token: string): Promise<User> {
+    const response = await authService.fetchWithAuth(`${API_BASE}/api/v1/auth/me`, {
+      token,
+      method: "GET",
     })
 
     if (!response.ok) {
-      throw new Error("Failed to get user")
+      throw new Error(await getErrorMessage(response, "Failed to get user"))
     }
 
-    const user = await response.json()
-    localStorage.setItem("user", JSON.stringify(user))
+    const user = (await response.json()) as User
+    if (typeof window !== "undefined") {
+      localStorage.setItem(STORAGE_KEYS.user, JSON.stringify(user))
+      emitAuthState({
+        type: "session_updated",
+        access_token: getStoredAccessToken(),
+        refresh_token: getStoredRefreshToken(),
+        user,
+      })
+    }
     return user
   },
 
-  // -----------------------
-  // GET SESSION FROM LOCALSTORAGE
-  // -----------------------
-  getSession: async (): Promise<Session | null> => {
-    let access_token = localStorage.getItem("access_token")
-    let refresh_token = localStorage.getItem("refresh_token")
-    const userStr = localStorage.getItem("user")
-    
-    if (!access_token || !refresh_token || !userStr) {
+  async getSession(): Promise<Session | null> {
+    const refreshToken = getStoredRefreshToken()
+
+    if (!refreshToken) {
       return null
     }
 
     try {
-      if (authService.isTokenExpired(access_token)) {
-        const refreshed = await authService.refreshToken(refresh_token)
-        access_token = refreshed.access_token
-        refresh_token = refreshed.refresh_token
+      const accessToken = await authService.getValidAccessToken()
+      let user = getStoredUser()
+
+      // Recover session identity even if localStorage user payload is missing/stale.
+      if (!user) {
+        user = await authService.getCurrentUser(accessToken)
       }
 
-      const user = JSON.parse(userStr) as User
+      if (!user) {
+        authService.clearSession()
+        return null
+      }
+
       return {
         user,
-        access_token,
-        refresh_token
+        access_token: accessToken,
+        refresh_token: getStoredRefreshToken() ?? refreshToken,
       }
     } catch {
+      authService.clearSession()
       return null
     }
   },
 
-  // -----------------------
-  // CHECK IF TOKEN IS EXPIRED (utility)
-  // -----------------------
-  isTokenExpired: (token: string): boolean => {
-    try {
-      const payload = JSON.parse(atob(token.split('.')[1]))
-      return payload.exp * 1000 < Date.now()
-    } catch {
-      return true
-    }
-  },
+  async getValidAccessToken(
+    token?: string | null,
+    options: Readonly<{ forceRefresh?: boolean }> = {},
+  ): Promise<string> {
+    const { forceRefresh = false } = options
+    const storedAccessToken = getStoredAccessToken()
+    const accessToken = storedAccessToken ?? token ?? null
 
-  getValidAccessToken: async (token?: string | null): Promise<string> => {
-    const accessToken = token || localStorage.getItem("access_token")
-    if (!accessToken) {
-      throw new Error("No active session")
-    }
-
-    if (!authService.isTokenExpired(accessToken)) {
+    if (
+      accessToken &&
+      !forceRefresh &&
+      !authService.isTokenExpired(accessToken, TOKEN_REFRESH_LEEWAY_MS)
+    ) {
       return accessToken
     }
 
-    const refreshToken = localStorage.getItem("refresh_token")
+    const refreshToken = getStoredRefreshToken()
     if (!refreshToken) {
       throw new Error("Session expired. Please sign in again.")
     }
 
-    const refreshed = await authService.refreshToken(refreshToken)
+    const refreshed = await refreshWithToken(refreshToken)
     return refreshed.access_token
-  }
+  },
+
+  async fetchWithAuth(
+    input: RequestInfo | URL,
+    options: AuthFetchOptions = {},
+  ): Promise<Response> {
+    const { token, retryOnUnauthorized = true, headers, ...rest } = options
+
+    const execute = async (accessToken: string): Promise<Response> =>
+      fetch(input, {
+        ...rest,
+        headers: withAuthorizationHeader(accessToken, headers),
+      })
+
+    try {
+      const currentAccessToken = await authService.getValidAccessToken(token)
+      let response = await execute(currentAccessToken)
+
+      if (response.status !== 401 || !retryOnUnauthorized) {
+        return response
+      }
+
+      const refreshedToken = await authService.getValidAccessToken(undefined, {
+        forceRefresh: true,
+      })
+      response = await execute(refreshedToken)
+
+      return response
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("Session expired")) {
+        authService.clearSession()
+      }
+      throw error
+    }
+  },
+
+  async requestJsonWithAuth<TResponse, TBody = undefined>(
+    input: RequestInfo | URL,
+    options: JsonAuthRequestOptions<TBody> = {},
+  ): Promise<TResponse> {
+    const { body, headers, ...rest } = options
+    const response = await authService.fetchWithAuth(input, {
+      ...rest,
+      headers: createJsonHeaders(headers),
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+
+    if (!response.ok) {
+      throw new Error(await getErrorMessage(response, "Request failed"))
+    }
+
+    return (await response.json()) as TResponse
+  },
 }

@@ -1,5 +1,4 @@
-import { DashboardOverviewData } from "@/lib/models/dashboard"
-import { handleTokenExpired } from "@/lib/utils/auth"
+import type { DashboardOverviewData } from "@/lib/models/dashboard"
 import { authService } from "@/lib/services/authService"
 
 const API_BASE =
@@ -7,28 +6,14 @@ const API_BASE =
 
 export class DashboardService {
   static async getOverview(
-    token: string
+    token?: string | null
   ): Promise<DashboardOverviewData> {
-    const accessToken = await authService.getValidAccessToken(token)
-    const res = await fetch(
+    return authService.requestJsonWithAuth<DashboardOverviewData>(
       `${API_BASE}/api/v1/dashboard/overview`,
       {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-        },
-      }
+        method: "GET",
+        token,
+      },
     )
-
-    if (res.status === 401) {
-      handleTokenExpired()
-    }
-
-    if (!res.ok) {
-      const error = await res.json().catch(() => ({}))
-      throw new Error(error.detail || "Failed to load dashboard")
-    }
-
-    return res.json()
   }
 }

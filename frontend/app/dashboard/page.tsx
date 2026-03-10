@@ -21,10 +21,40 @@ import { SystemConfiguration } from "@/components/ui-panels/system-configuration
 import { DataUpload } from "@/components/data-upload"
 import { authService } from "@/lib/services/authService"
 import { bootstrapService } from "@/lib/services/bootstrapService"
+import { useAuth } from "@/hooks/useAuth"
+import type { User } from "@/lib/models/auth"
 
 type Screen = "dashboard" | "generate" | "archive" | "config" | "upload"
 
+const getDisplayName = (user: User | null): string => {
+  const name = user?.full_name?.trim()
+  if (name) return name
+
+  const email = user?.email?.trim()
+  if (!email) return "User"
+
+  const localPart = email.split("@")[0]?.trim()
+  return localPart || "User"
+}
+
+const getAvatarLabel = (user: User | null): string => {
+  const displayName = getDisplayName(user)
+  if (!displayName || displayName === "User") return "U"
+
+  const words = displayName
+    .split(/\s+/)
+    .map((word) => word.trim())
+    .filter(Boolean)
+
+  if (words.length >= 2) {
+    return `${words[0][0] ?? ""}${words[1][0] ?? ""}`.toUpperCase()
+  }
+
+  return (words[0]?.slice(0, 2) || "U").toUpperCase()
+}
+
 export default function Dashboard() {
+  const { user: sessionUser, access_token: token, isLoading: authLoading } = useAuth()
   const [currentScreen, setCurrentScreen] = useState<Screen>("dashboard")
   const [visitedScreens, setVisitedScreens] = useState<Screen[]>(["dashboard"])
   const [selectedCounty, setSelectedCounty] = useState<string | null>(null)
@@ -32,30 +62,33 @@ export default function Dashboard() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [isLoggingOut, setIsLoggingOut] = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
-  const [user, setUser] = useState<{ username: string; county: string } | null>(null)
+  const [bootstrappedToken, setBootstrappedToken] = useState<string | null>(null)
 
-  // Fetch user session
   useEffect(() => {
-    authService.getSession().then(session => {
-      if (session?.user) {
-        setUser({
-          username: session.user.full_name || "Unknown",
-          county: session.user.county || "Unknown",
-        })
+    if (authLoading) return
 
-        // Warm critical panels in background without blocking navigation.
-        void bootstrapService.primeDashboardData(session.access_token)
-      }
-    })
-  }, [])
+    if (!token) {
+      window.location.replace("/sign-in")
+      return
+    }
+
+    if (token !== bootstrappedToken) {
+      setBootstrappedToken(token)
+      void bootstrapService.primeDashboardData(token)
+    }
+  }, [authLoading, token, bootstrappedToken])
 
   const handleLogout = async () => {
     setIsLoggingOut(true)
     try {
-      const token = localStorage.getItem("access_token")
-      if (token) await authService.logout(token)
+      if (token) {
+        await authService.logout(token)
+      } else {
+        authService.clearSession()
+      }
     } catch (error) {
       console.error("Logout error:", error)
+      authService.clearSession()
     } finally {
       window.location.replace("/sign-in")
     }
@@ -117,7 +150,7 @@ export default function Dashboard() {
           <div>
             <h1 className="font-bold text-lg">Clima Scope</h1>
             <p className="text-xs text-muted-foreground">
-              {user?.county || "—"} County
+              {sessionUser?.county || "—"} County
             </p>
           </div>
         </div>
@@ -175,11 +208,11 @@ export default function Dashboard() {
                 onClick={() => setUserMenuOpen((s) => !s)}
                 className="w-9 h-9 rounded-full border border-gray-400 flex items-center justify-center text-gray-400 font-semibold hover:bg-muted transition-colors"
               >
-                {user?.username[0]?.toUpperCase() || "U"}
+                {getAvatarLabel(sessionUser)}
               </button>
 
               <span className="text-xs text-muted-foreground mt-1">
-                Welcome, {user?.username || "User"}
+                Welcome, {getDisplayName(sessionUser)}
               </span>
 
               {/* Dropdown */}

@@ -8,46 +8,33 @@ export class ReportService {
   /**
    * Fetch all reports for the current user
    */
-  static async getReports(token: string): Promise<ReportArchiveItem[]> {
-    const accessToken = await authService.getValidAccessToken(token)
-    const res = await fetch(`${API_BASE}/api/v1/reports`, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
+  static async getReports(token?: string | null): Promise<ReportArchiveItem[]> {
+    return authService.requestJsonWithAuth<ReportArchiveItem[]>(
+      `${API_BASE}/api/v1/reports`,
+      {
+        method: "GET",
+        token,
       },
-    })
-
-    if (res.status === 401) {
-      handleTokenExpired()
-    }
-
-    if (!res.ok) {
-      const error = await res.json().catch(() => ({}))
-      throw new Error(error.detail || "Failed to load reports")
-    }
-
-    return res.json()
+    )
   }
 
   /**
    * Download a report PDF via secure backend route
    */
-  static async downloadReport(token: string, reportId: string) {
-    const accessToken = await authService.getValidAccessToken(token)
-    const res = await fetch(`${API_BASE}/api/v1/reports/download/${reportId}`, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
+  static async downloadReport(token: string | null | undefined, reportId: string) {
+    const res = await authService.fetchWithAuth(
+      `${API_BASE}/api/v1/reports/download/${reportId}`,
+      {
+        method: "GET",
+        token,
       },
-    })
-
-    if (res.status === 401) {
-      handleTokenExpired()
-    }
+    )
 
     if (!res.ok) {
-      const error = await res.json().catch(() => ({}))
-      throw new Error(error.detail || "Failed to download report")
+      const error = await res.json().catch(
+        () => null as { detail?: string; message?: string } | null,
+      )
+      throw new Error(error?.detail || error?.message || "Failed to download report")
     }
 
     // Convert to blob for download

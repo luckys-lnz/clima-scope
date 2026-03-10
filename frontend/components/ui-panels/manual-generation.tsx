@@ -16,7 +16,7 @@ import type { ValidationResponse, MapOutput } from "@/lib/models/workflow"
 interface ManualGenerationProps {
   onBack: () => void
 }
-
+]
 const REPORT_JOB_ACTIVE_KEY = "report_job_active"
 
 export function ManualGeneration({ onBack }: ManualGenerationProps) {
@@ -46,7 +46,6 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
     return date.toISOString().split('T')[0] // "2026-03-23"
   }
 
-  // ===== SESSION =====
   useEffect(() => {
     authService.getSession().then((session) => {
       if (session?.user) {
@@ -113,8 +112,8 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
         addLog(`✓ Prepared map CSV saved: ${result.prepared_map_csv_path}`)
       }
       addLog("Stage 1 complete")
-    } catch (e: any) {
-      const errorMsg = e.message || "Validation failed"
+    } catch (error: unknown) {
+      const errorMsg = getErrorMessage(error, "Validation failed")
       addLog(`✗ Validation failed: ${errorMsg}`)
       setErrorMessage(errorMsg)
     } finally {
@@ -154,8 +153,8 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
 
       setStep(4)
       addLog("Stage 3 complete")
-    } catch (e: any) {
-      const errorMsg = e.message || "Map generation failed"
+    } catch (error: unknown) {
+      const errorMsg = getErrorMessage(error, "Map generation failed")
       addLog(`✗ Map generation failed: ${errorMsg}`)
       setErrorMessage(errorMsg)
     } finally {
