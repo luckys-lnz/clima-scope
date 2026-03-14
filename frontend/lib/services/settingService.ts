@@ -1,4 +1,4 @@
-import type { SettingsResponse } from "@/lib/models/setting"
+import type { SettingsResponse, UpdateSettingsPayload, MapPreviewResponse } from "@/lib/models/setting"
 import { authService } from "@/lib/services/authService"
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
@@ -14,9 +14,9 @@ export class SettingsService {
     )
   }
 
-  static async updateTemplate(
+  static async updateSettings(
     token: string | null | undefined,
-    pdfTemplateId: string | null,
+    payload: UpdateSettingsPayload,
   ) {
     const res = await authService.fetchWithAuth(`${API_BASE}/api/v1/setting`, {
       method: "PUT",
@@ -24,9 +24,7 @@ export class SettingsService {
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        pdf_template_id: pdfTemplateId,
-      }),
+      body: JSON.stringify(payload),
     })
 
     if (!res.ok) {
@@ -35,5 +33,19 @@ export class SettingsService {
       )
       throw new Error(error?.detail || error?.message || "Failed to update settings")
     }
+  }
+
+  static async getCountyPreview(
+    token: string | null | undefined,
+    county?: string,
+  ): Promise<MapPreviewResponse> {
+    const query = county ? `?county=${encodeURIComponent(county)}` : ""
+    return authService.requestJsonWithAuth<MapPreviewResponse>(
+      `${API_BASE}/api/v1/setting/preview-geometry${query}`,
+      {
+        method: "GET",
+        token,
+      },
+    )
   }
 }
