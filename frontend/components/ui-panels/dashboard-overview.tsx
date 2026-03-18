@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { CheckCircle, Circle, Database, Calendar } from "lucide-react"
+import { BarChart3, CheckCircle, Circle, Database, Calendar } from "lucide-react"
 
 import { DashboardOverviewData } from "@/lib/models/dashboard"
 import { DashboardService } from "@/lib/services/dashboardService"
@@ -13,6 +13,7 @@ import { UsageRow } from "@/components/ui/usage-row"
 import { StatCard } from "@/components/stat-card"
 import { formatRelativeDate } from "@/lib/utils/date"
 import { useAuth } from "@/hooks/useAuth"
+import { StatusPanel } from "@/components/ui/status-panel"
 
 interface DashboardOverviewProps {
   onNavigate: (screen: string) => void
@@ -89,7 +90,19 @@ export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
     }
   }, [token, authLoading])
 
-  if (loading) return <div className="p-6">Loading dashboard…</div>
+  if (loading) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center p-6">
+        <div className="w-full max-w-md rounded-lg border border-border/60 bg-card/95 p-6 shadow-2xl backdrop-blur">
+          <StatusPanel
+            icon={BarChart3}
+            title="Loading dashboard"
+            description="Fetching the latest metrics and activity."
+          />
+        </div>
+      </div>
+    )
+  }
   if (error || !data) return <div className="p-6 text-red-500">{error || "No data"}</div>
 
   const { stats, workflow_step, workflow_progress: workflowProgress } = data

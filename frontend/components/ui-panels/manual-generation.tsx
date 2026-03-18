@@ -16,8 +16,14 @@ import type { ValidationResponse, MapOutput } from "@/lib/models/workflow"
 interface ManualGenerationProps {
   onBack: () => void
 }
-]
+
 const REPORT_JOB_ACTIVE_KEY = "report_job_active"
+
+const getErrorMessage = (error: unknown, fallback: string): string => {
+  if (error instanceof Error && error.message) return error.message
+  if (typeof error === "string" && error.trim()) return error
+  return fallback
+}
 
 export function ManualGeneration({ onBack }: ManualGenerationProps) {
   // ===== WORKFLOW STATE =====
@@ -95,7 +101,7 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
           report_end_at: formatDateToISO(reportWindow.end)
         }
       )
-      
+
       setValidationResult(result)
       setAvailableVars(result.variables)
       setStep(2)
@@ -418,9 +424,9 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
                   {generatedMaps.map((map) => (
                     <li key={map.variable} className="capitalize flex items-center gap-2">
                       <span>{map.variable}</span>
-                      <a 
-                        href={map.map_url} 
-                        target="_blank" 
+                      <a
+                        href={map.map_url}
+                        target="_blank"
                         rel="noopener noreferrer"
                         className="text-xs text-primary hover:underline"
                       >
