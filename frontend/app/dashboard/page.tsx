@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, type ReactNode } from "react"
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import {
   BarChart3,
   FileText,
@@ -11,6 +11,7 @@ import {
   Menu,
   X,
   LogOut,
+  CheckCircle2,
 } from "lucide-react"
 
 import { DashboardOverview } from "@/components/ui-panels/dashboard-overview"
@@ -19,12 +20,17 @@ import { ReportArchive } from "@/components/ui-panels/report-archive"
 import { CountyDetail } from "@/components/ui-panels/county-detail"
 import { SystemConfiguration } from "@/components/ui-panels/system-configuration"
 import { DataUpload } from "@/components/data-upload"
+import { Dialog, DialogContent } from "@/components/ui/dialog"
+import { StatusPanel } from "@/components/ui/status-panel"
 import { authService } from "@/lib/services/authService"
 import { bootstrapService } from "@/lib/services/bootstrapService"
 import { useAuth } from "@/hooks/useAuth"
 import type { User } from "@/lib/models/auth"
 
 type Screen = "dashboard" | "generate" | "archive" | "config" | "upload"
+type LogoutPhase = "idle" | "submitting" | "success"
+
+const LOGOUT_REDIRECT_DELAY_MS = 1400 as const
 
 const getDisplayName = (user: User | null): string => {
   const name = user?.full_name?.trim()
@@ -60,14 +66,34 @@ export default function Dashboard() {
   const [selectedCounty, setSelectedCounty] = useState<string | null>(null)
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [isLoggingOut, setIsLoggingOut] = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const [bootstrappedToken, setBootstrappedToken] = useState<string | null>(null)
+  const [logoutPhase, setLogoutPhase] = useState<LogoutPhase>("idle")
+  const [logoutDialogOpen, setLogoutDialogOpen] = useState(false)
+  const logoutRedirectRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const isLoggingOut = logoutPhase === "submitting"
+
+  const redirectToLanding = useCallback((): void => {
+    window.location.replace("/")
+  }, [])
+
+  const scheduleLandingRedirect = useCallback((): void => {
+    if (logoutRedirectRef.current) {
+      globalThis.clearTimeout(logoutRedirectRef.current)
+    }
+    logoutRedirectRef.current = globalThis.setTimeout(
+      redirectToLanding,
+      LOGOUT_REDIRECT_DELAY_MS,
+    )
+  }, [redirectToLanding])
 
   useEffect(() => {
     if (authLoading) return
 
     if (!token) {
+      if (logoutPhase !== "idle") {
+        return
+      }
       window.location.replace("/sign-in")
       return
     }
@@ -76,10 +102,20 @@ export default function Dashboard() {
       setBootstrappedToken(token)
       void bootstrapService.primeDashboardData(token)
     }
-  }, [authLoading, token, bootstrappedToken])
+  }, [authLoading, token, bootstrappedToken, logoutPhase])
+
+  useEffect(() => {
+    return () => {
+      if (logoutRedirectRef.current) {
+        globalThis.clearTimeout(logoutRedirectRef.current)
+      }
+    }
+  }, [])
 
   const handleLogout = async () => {
-    setIsLoggingOut(true)
+    if (logoutPhase !== "idle") return
+    setUserMenuOpen(false)
+    setLogoutPhase("submitting")
     try {
       if (token) {
         await authService.logout(token)
@@ -90,7 +126,9 @@ export default function Dashboard() {
       console.error("Logout error:", error)
       authService.clearSession()
     } finally {
-      window.location.replace("/sign-in")
+      setLogoutPhase("success")
+      setLogoutDialogOpen(true)
+      scheduleLandingRedirect()
     }
   }
 
@@ -274,6 +312,28 @@ export default function Dashboard() {
           </div>
         </div>
       </main>
+
+      <Dialog
+        open={logoutDialogOpen}
+        onOpenChange={(open) => {
+          setLogoutDialogOpen(open)
+          if (!open && logoutPhase === "success") {
+            redirectToLanding()
+          }
+        }}
+      >
+        <DialogContent
+          showCloseButton={false}
+          className="sm:max-w-md bg-card/95 border-border/60 shadow-2xl backdrop-blur data-[state=open]:slide-in-from-bottom-2 data-[state=closed]:slide-out-to-bottom-2"
+        >
+          <StatusPanel
+            variant="dialog"
+            icon={CheckCircle2}
+            title="Signed out"
+            description="You're logged out. Redirecting to the landing page."
+          />
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
