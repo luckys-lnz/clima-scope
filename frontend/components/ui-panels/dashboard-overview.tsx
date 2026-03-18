@@ -22,7 +22,9 @@ interface DashboardOverviewProps {
 const DASHBOARD_CACHE_KEY = "dashboard_overview_cache_v1"
 const REPORT_JOB_ACTIVE_KEY = "report_job_active"
 
-export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
+export function DashboardOverview({
+  onNavigate,
+}: DashboardOverviewProps) {
   const getCachedData = (): DashboardOverviewData | null => {
     if (typeof window === "undefined") return null
     try {
@@ -33,7 +35,7 @@ export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
     }
   }
 
-  const { access_token: token, isLoading: authLoading } = useAuth()
+  const { access_token: token, isLoading: authLoading, status: authStatus } = useAuth()
   const [data, setData] = useState<DashboardOverviewData | null>(() => getCachedData())
   const [loading, setLoading] = useState(() => !getCachedData())
   const [error, setError] = useState<string | null>(null)
@@ -41,8 +43,13 @@ export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
   useEffect(() => {
     if (authLoading) return
     if (!token) {
-      setError("Session expired. Please sign in again.")
-      setLoading(false)
+      if (authStatus === "expired") {
+        setError("Session expired. Please sign in again.")
+        setLoading(false)
+        return
+      }
+      setError(null)
+      setLoading(true)
       return
     }
 
@@ -88,7 +95,7 @@ export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
       cancelled = true
       if (pollHandle) clearInterval(pollHandle)
     }
-  }, [token, authLoading])
+  }, [token, authLoading, authStatus])
 
   if (loading) {
     return (

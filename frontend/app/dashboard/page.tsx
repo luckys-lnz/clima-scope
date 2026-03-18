@@ -22,7 +22,6 @@ import { SystemConfiguration } from "@/components/ui-panels/system-configuration
 import { DataUpload } from "@/components/data-upload"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { StatusPanel } from "@/components/ui/status-panel"
-import { authService } from "@/lib/services/authService"
 import { bootstrapService } from "@/lib/services/bootstrapService"
 import { useAuth } from "@/hooks/useAuth"
 import type { User } from "@/lib/models/auth"
@@ -60,7 +59,12 @@ const getAvatarLabel = (user: User | null): string => {
 }
 
 export default function Dashboard() {
-  const { user: sessionUser, access_token: token, isLoading: authLoading } = useAuth()
+  const {
+    user: sessionUser,
+    access_token: token,
+    isLoading: authLoading,
+    logout,
+  } = useAuth()
   const [currentScreen, setCurrentScreen] = useState<Screen>("dashboard")
   const [visitedScreens, setVisitedScreens] = useState<Screen[]>(["dashboard"])
   const [selectedCounty, setSelectedCounty] = useState<string | null>(null)
@@ -117,14 +121,7 @@ export default function Dashboard() {
     setUserMenuOpen(false)
     setLogoutPhase("submitting")
     try {
-      if (token) {
-        await authService.logout(token)
-      } else {
-        authService.clearSession()
-      }
-    } catch (error) {
-      console.error("Logout error:", error)
-      authService.clearSession()
+      await logout()
     } finally {
       setLogoutPhase("success")
       setLogoutDialogOpen(true)
