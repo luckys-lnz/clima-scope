@@ -251,8 +251,10 @@ function MapSettingsPreview({
   )
 }
 
-export function SystemConfiguration({ onBack }: SystemConfigurationProps) {
-  const { access_token: token, isLoading: authLoading, user } = useAuth()
+export function SystemConfiguration({
+  onBack,
+}: SystemConfigurationProps) {
+  const { access_token: token, isLoading: authLoading, user, status: authStatus } = useAuth()
 
   const getCachedData = (): CachedSettings | null => {
     if (typeof window === "undefined") return null
@@ -286,8 +288,13 @@ export function SystemConfiguration({ onBack }: SystemConfigurationProps) {
 
   useEffect(() => {
     if (!authLoading && !token) {
-      setLoading(false)
-      setError("Session expired. Please sign in again.")
+      if (authStatus === "expired") {
+        setLoading(false)
+        setError("Session expired. Please sign in again.")
+        return
+      }
+      setError(null)
+      setLoading(true)
       return
     }
 
@@ -332,7 +339,7 @@ export function SystemConfiguration({ onBack }: SystemConfigurationProps) {
     }
 
     fetchSettings()
-  }, [token, authLoading])
+  }, [token, authLoading, authStatus])
 
   useEffect(() => {
     if (authLoading) return

@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { CheckCircle, Circle, Database, Calendar } from "lucide-react"
+import { BarChart3, CheckCircle, Circle, Database, Calendar } from "lucide-react"
 
 import { DashboardOverviewData } from "@/lib/models/dashboard"
 import { DashboardService } from "@/lib/services/dashboardService"
@@ -13,6 +13,7 @@ import { UsageRow } from "@/components/ui/usage-row"
 import { StatCard } from "@/components/stat-card"
 import { formatRelativeDate } from "@/lib/utils/date"
 import { useAuth } from "@/hooks/useAuth"
+import { StatusPanel } from "@/components/ui/status-panel"
 
 interface DashboardOverviewProps {
   onNavigate: (screen: string) => void
@@ -21,7 +22,9 @@ interface DashboardOverviewProps {
 const DASHBOARD_CACHE_KEY = "dashboard_overview_cache_v1"
 const REPORT_JOB_ACTIVE_KEY = "report_job_active"
 
-export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
+export function DashboardOverview({
+  onNavigate,
+}: DashboardOverviewProps) {
   const getCachedData = (): DashboardOverviewData | null => {
     if (typeof window === "undefined") return null
     try {
@@ -32,7 +35,7 @@ export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
     }
   }
 
-  const { access_token: token, isLoading: authLoading } = useAuth()
+  const { access_token: token, isLoading: authLoading, status: authStatus } = useAuth()
   const [data, setData] = useState<DashboardOverviewData | null>(() => getCachedData())
   const [loading, setLoading] = useState(() => !getCachedData())
   const [error, setError] = useState<string | null>(null)
@@ -40,8 +43,13 @@ export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
   useEffect(() => {
     if (authLoading) return
     if (!token) {
-      setError("Session expired. Please sign in again.")
-      setLoading(false)
+      if (authStatus === "expired") {
+        setError("Session expired. Please sign in again.")
+        setLoading(false)
+        return
+      }
+      setError(null)
+      setLoading(true)
       return
     }
 
@@ -87,9 +95,21 @@ export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
       cancelled = true
       if (pollHandle) clearInterval(pollHandle)
     }
-  }, [token, authLoading])
+  }, [token, authLoading, authStatus])
 
-  if (loading) return <div className="p-6">Loading dashboard…</div>
+  if (loading) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center p-6">
+        <div className="w-full max-w-md rounded-lg border border-border/60 bg-card/95 p-6 shadow-2xl backdrop-blur">
+          <StatusPanel
+            icon={BarChart3}
+            title="Loading dashboard"
+            description="Fetching the latest metrics and activity."
+          />
+        </div>
+      </div>
+    )
+  }
   if (error || !data) return <div className="p-6 text-red-500">{error || "No data"}</div>
 
   const { stats, workflow_step, workflow_progress: workflowProgress } = data
