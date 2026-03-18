@@ -13,6 +13,7 @@ import {
   LogOut,
   CheckCircle2,
 } from "lucide-react"
+import type { LucideIcon } from "lucide-react"
 
 import { DashboardOverview } from "@/components/ui-panels/dashboard-overview"
 import { ManualGeneration } from "@/components/ui-panels/manual-generation"
@@ -20,7 +21,6 @@ import { ReportArchive } from "@/components/ui-panels/report-archive"
 import { CountyDetail } from "@/components/ui-panels/county-detail"
 import { SystemConfiguration } from "@/components/ui-panels/system-configuration"
 import { DataUpload } from "@/components/data-upload"
-import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { StatusPanel } from "@/components/ui/status-panel"
 import { bootstrapService } from "@/lib/services/bootstrapService"
 import { useAuth } from "@/hooks/useAuth"
@@ -28,8 +28,28 @@ import type { User } from "@/lib/models/auth"
 
 type Screen = "dashboard" | "generate" | "archive" | "config" | "upload"
 type LogoutPhase = "idle" | "submitting" | "success"
+type LogoutOverlayPhase = Exclude<LogoutPhase, "idle">
 
 const LOGOUT_REDIRECT_DELAY_MS = 1400 as const
+const LOGOUT_PANEL_CONTENT = {
+  submitting: {
+    icon: LogOut,
+    title: "Signing out",
+    description: "Finishing up. You'll be redirected shortly.",
+  },
+  success: {
+    icon: CheckCircle2,
+    title: "Signed out",
+    description: "You're logged out. Redirecting to the home page.",
+  },
+} as const satisfies Record<
+  LogoutOverlayPhase,
+  Readonly<{
+    icon: LucideIcon
+    title: string
+    description: string
+  }>
+>
 
 const getDisplayName = (user: User | null): string => {
   const name = user?.full_name?.trim()
@@ -73,9 +93,11 @@ export default function Dashboard() {
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const [bootstrappedToken, setBootstrappedToken] = useState<string | null>(null)
   const [logoutPhase, setLogoutPhase] = useState<LogoutPhase>("idle")
-  const [logoutDialogOpen, setLogoutDialogOpen] = useState(false)
   const logoutRedirectRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isLoggingOut = logoutPhase === "submitting"
+  const isLogoutOverlayVisible = logoutPhase !== "idle"
+  const logoutPanel =
+    logoutPhase === "idle" ? null : LOGOUT_PANEL_CONTENT[logoutPhase]
 
   const redirectToLanding = useCallback((): void => {
     window.location.replace("/")
@@ -124,7 +146,6 @@ export default function Dashboard() {
       await logout()
     } finally {
       setLogoutPhase("success")
-      setLogoutDialogOpen(true)
       scheduleLandingRedirect()
     }
   }
@@ -165,172 +186,164 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="flex h-screen bg-background">
-      {/* Mobile overlay */}
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 z-30 bg-black/50 md:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
-
-      {/* Sidebar */}
-      <aside
-        className={`fixed left-0 top-0 h-full w-64 bg-sidebar border-r border-border transform transition-transform md:relative md:translate-x-0 z-40 ${
-          sidebarOpen ? "translate-x-0" : "-translate-x-full"
-        }`}
-      >
-        <div className="flex items-center gap-3 px-6 py-6 border-b border-border">
-          <MapPin className="w-6 h-6 text-primary" />
-          <div>
-            <h1 className="font-bold text-lg">Clima Scope</h1>
-            <p className="text-xs text-muted-foreground">
-              {sessionUser?.county || "—"} County
-            </p>
+    <div className="relative h-screen bg-background">
+      {isLogoutOverlayVisible && logoutPanel ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background">
+          <div className="w-full max-w-md rounded-lg border border-border/60 bg-card/95 p-6 shadow-2xl">
+            <StatusPanel
+              icon={logoutPanel.icon}
+              title={logoutPanel.title}
+              description={logoutPanel.description}
+            />
           </div>
         </div>
+      ) : (
+        <div className="flex h-full">
+          {/* Mobile overlay */}
+          {sidebarOpen && (
+            <div
+              className="fixed inset-0 z-30 bg-black/50 md:hidden"
+              onClick={() => setSidebarOpen(false)}
+            />
+          )}
 
-        <nav className="p-4 space-y-1">
-          {navItems.map((item) => {
-            const Icon = item.icon
-            const isActive = currentScreen === item.id
-            return (
-              <button
-                key={item.id}
-                onClick={() => {
-                  navigateTo(item.id as Screen)
-                  setSidebarOpen(false)
-                }}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-sm font-medium ${
-                  isActive
-                    ? "bg-primary/20 text-primary border border-primary/50"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                }`}
-              >
-                <Icon className="w-5 h-5" />
-                <span>{item.label}</span>
-              </button>
-            )
-          })}
-        </nav>
-      </aside>
-
-      {/* Main */}
-      <main className="flex-1 flex flex-col overflow-hidden">
-        {/* Header */}
-        <header className="bg-card border-b border-border sticky top-0 z-20">
-          <div className="flex items-center justify-between px-4 md:px-8 py-4">
-            {/* Left */}
-            <div className="flex items-center gap-4">
-              <button
-                onClick={() => setSidebarOpen(!sidebarOpen)}
-                className="md:hidden p-2 hover:bg-muted rounded-lg"
-              >
-                {sidebarOpen ? (
-                  <X className="w-5 h-5" />
-                ) : (
-                  <Menu className="w-5 h-5" />
-                )}
-              </button>
-              <h2 className="text-2xl font-bold">
-                {getTitle(currentScreen as string)}
-              </h2>
+          {/* Sidebar */}
+          <aside
+            className={`fixed left-0 top-0 h-full w-64 bg-sidebar border-r border-border transform transition-transform md:relative md:translate-x-0 z-40 ${
+              sidebarOpen ? "translate-x-0" : "-translate-x-full"
+            }`}
+          >
+            <div className="flex items-center gap-3 px-6 py-6 border-b border-border">
+              <MapPin className="w-6 h-6 text-primary" />
+              <div>
+                <h1 className="font-bold text-lg">Clima Scope</h1>
+                <p className="text-xs text-muted-foreground">
+                  {sessionUser?.county || "—"} County
+                </p>
+              </div>
             </div>
 
-            {/* Right: Avatar vertical */}
-            <div className="relative flex flex-col items-center">
-              <button
-                onClick={() => setUserMenuOpen((s) => !s)}
-                className="w-9 h-9 rounded-full border border-gray-400 flex items-center justify-center text-gray-400 font-semibold hover:bg-muted transition-colors"
-              >
-                {getAvatarLabel(sessionUser)}
-              </button>
-
-              <span className="text-xs text-muted-foreground mt-1">
-                Welcome, {getDisplayName(sessionUser)}
-              </span>
-
-              {/* Dropdown */}
-              {userMenuOpen && (
-                <div className="absolute right-0 top-12 w-36 bg-card border border-border rounded-lg shadow-lg z-50">
+            <nav className="p-4 space-y-1">
+              {navItems.map((item) => {
+                const Icon = item.icon
+                const isActive = currentScreen === item.id
+                return (
                   <button
-                    onClick={handleLogout}
-                    disabled={isLoggingOut}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg"
+                    key={item.id}
+                    onClick={() => {
+                      navigateTo(item.id as Screen)
+                      setSidebarOpen(false)
+                    }}
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-sm font-medium ${
+                      isActive
+                        ? "bg-primary/20 text-primary border border-primary/50"
+                        : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                    }`}
                   >
-                    <LogOut className="w-4 h-4" />
-                    {isLoggingOut ? "Logging out…" : "Logout"}
+                    <Icon className="w-5 h-5" />
+                    <span>{item.label}</span>
                   </button>
+                )
+              })}
+            </nav>
+          </aside>
+
+          {/* Main */}
+          <main className="flex-1 flex flex-col overflow-hidden">
+            {/* Header */}
+            <header className="bg-card border-b border-border sticky top-0 z-20">
+              <div className="flex items-center justify-between px-4 md:px-8 py-4">
+                {/* Left */}
+                <div className="flex items-center gap-4">
+                  <button
+                    onClick={() => setSidebarOpen(!sidebarOpen)}
+                    className="md:hidden p-2 hover:bg-muted rounded-lg"
+                  >
+                    {sidebarOpen ? (
+                      <X className="w-5 h-5" />
+                    ) : (
+                      <Menu className="w-5 h-5" />
+                    )}
+                  </button>
+                  <h2 className="text-2xl font-bold">
+                    {getTitle(currentScreen as string)}
+                  </h2>
                 </div>
-              )}
+
+                {/* Right: Avatar vertical */}
+                <div className="relative flex flex-col items-center">
+                  <button
+                    onClick={() => setUserMenuOpen((s) => !s)}
+                    className="w-9 h-9 rounded-full border border-gray-400 flex items-center justify-center text-gray-400 font-semibold hover:bg-muted transition-colors"
+                  >
+                    {getAvatarLabel(sessionUser)}
+                  </button>
+
+                  <span className="text-xs text-muted-foreground mt-1">
+                    Welcome, {getDisplayName(sessionUser)}
+                  </span>
+
+                  {/* Dropdown */}
+                  {userMenuOpen && (
+                    <div className="absolute right-0 top-12 w-36 bg-card border border-border rounded-lg shadow-lg z-50">
+                      <button
+                        onClick={handleLogout}
+                        disabled={isLoggingOut}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg"
+                      >
+                        <LogOut className="w-4 h-4" />
+                        {isLoggingOut ? "Logging out…" : "Logout"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </header>
+
+            {/* Content */}
+            <div className="flex-1 overflow-auto">
+              <div className="min-h-full">
+                {renderPanel(
+                  "dashboard",
+                  <DashboardOverview onNavigate={(screen: string) => navigateTo(screen as Screen)} />
+                )}
+                {renderPanel(
+                  "generate",
+                  <ManualGeneration onBack={() => navigateTo("dashboard")} />
+                )}
+                {renderPanel(
+                  "archive",
+                  selectedCounty ? (
+                    <CountyDetail
+                      county={selectedCounty}
+                      reportId={selectedReportId || undefined}
+                      onBack={() => {
+                        setSelectedCounty(null)
+                        setSelectedReportId(null)
+                      }}
+                    />
+                  ) : (
+                    <ReportArchive
+                      onSelectCounty={(county, reportId) => {
+                        setSelectedCounty(county)
+                        setSelectedReportId(reportId || null)
+                      }}
+                    />
+                  )
+                )}
+                {renderPanel(
+                  "config",
+                  <SystemConfiguration onBack={() => navigateTo("dashboard")} />
+                )}
+                {renderPanel(
+                  "upload",
+                  <DataUpload onBack={() => navigateTo("dashboard")} />
+                )}
+              </div>
             </div>
-          </div>
-        </header>
-
-        {/* Content */}
-        <div className="flex-1 overflow-auto">
-          <div className="min-h-full">
-            {renderPanel(
-              "dashboard",
-              <DashboardOverview onNavigate={(screen: string) => navigateTo(screen as Screen)} />
-            )}
-            {renderPanel(
-              "generate",
-              <ManualGeneration onBack={() => navigateTo("dashboard")} />
-            )}
-            {renderPanel(
-              "archive",
-              selectedCounty ? (
-                <CountyDetail
-                  county={selectedCounty}
-                  reportId={selectedReportId || undefined}
-                  onBack={() => {
-                    setSelectedCounty(null)
-                    setSelectedReportId(null)
-                  }}
-                />
-              ) : (
-                <ReportArchive
-                  onSelectCounty={(county, reportId) => {
-                    setSelectedCounty(county)
-                    setSelectedReportId(reportId || null)
-                  }}
-                />
-              )
-            )}
-            {renderPanel(
-              "config",
-              <SystemConfiguration onBack={() => navigateTo("dashboard")} />
-            )}
-            {renderPanel(
-              "upload",
-              <DataUpload onBack={() => navigateTo("dashboard")} />
-            )}
-          </div>
+          </main>
         </div>
-      </main>
-
-      <Dialog
-        open={logoutDialogOpen}
-        onOpenChange={(open) => {
-          setLogoutDialogOpen(open)
-          if (!open && logoutPhase === "success") {
-            redirectToLanding()
-          }
-        }}
-      >
-        <DialogContent
-          showCloseButton={false}
-          className="sm:max-w-md bg-card/95 border-border/60 shadow-2xl backdrop-blur data-[state=open]:slide-in-from-bottom-2 data-[state=closed]:slide-out-to-bottom-2"
-        >
-          <StatusPanel
-            variant="dialog"
-            icon={CheckCircle2}
-            title="Signed out"
-            description="You're logged out. Redirecting to the landing page."
-          />
-        </DialogContent>
-      </Dialog>
+      )}
     </div>
   )
 }
