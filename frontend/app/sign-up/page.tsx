@@ -187,7 +187,7 @@ export default function SignUp() {
   ].sort();
 
   return (
-    <div className="min-h-screen bg-background flex col justify-center items-center px-4">
+    <div className="min-h-screen bg-background flex justify-center items-center px-4">
       <div className="w-full max-w-md">
         {/* Header */}
         <div className="text-center mb-8">
