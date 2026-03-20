@@ -5,9 +5,11 @@ import geopandas as gpd
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
 from matplotlib.colors import ListedColormap, BoundaryNorm
 from matplotlib.lines import Line2D
 import io
+from pathlib import Path
 from datetime import datetime, timedelta
 from datetime import date as date_cls
 import logging
@@ -112,7 +114,13 @@ def create_weather_map(
     
     # 2. FILTER FOR COUNTY
     if county_name:
-        county_wards = wards[wards['county'] == county_name].copy()
+        county_col = _resolve_column(wards.columns, ["county", "county_name", "adm1_name"])
+        if not county_col:
+            raise ValueError("County column not found in shapefile")
+        county_wards = wards[
+            wards[county_col].astype(str).str.strip().str.lower()
+            == str(county_name).strip().lower()
+        ].copy()
         if len(county_wards) == 0:
             raise ValueError(f"County '{county_name}' not found!")
         plot_data = county_wards
@@ -207,6 +215,9 @@ def create_weather_map(
             figsize = (22, 22)
     else:
         figsize = (26, 23)
+
+    # scale up the canvas uniformly to enlarge the map without altering the ratio
+    figsize = tuple(dim * 1.3 for dim in figsize)
     
     fig = plt.figure(figsize=figsize)
     
@@ -390,13 +401,41 @@ def _add_scale_bar(ax, bounds):
         return
 
     width_km = (lon_max - lon_min) * km_per_deg_lon
-    scale_km = 20 if width_km > 70 else 10
+    # Use a "nice" total length near 25% of map width for a properly scaled graphic bar.
+    target_km = max(width_km * 0.25, 5.0)
+    nice_lengths = [5, 10, 20, 25, 50, 75, 100, 150, 200]
+    scale_km = min(nice_lengths, key=lambda n: abs(n - target_km))
     scale_deg = scale_km / km_per_deg_lon
+    segment_km = scale_km / 4.0
+    segment_deg = scale_deg / 4.0
 
-    x0 = lon_min + (lon_max - lon_min) * 0.06
-    y0 = lat_min + (lat_max - lat_min) * 0.05
-    ax.plot([x0, x0 + scale_deg], [y0, y0], color="black", linewidth=3, solid_capstyle="butt")
-    ax.text(x0 + scale_deg / 2, y0 + (lat_max - lat_min) * 0.02, f"{scale_km} km", ha="center", fontsize=9)
+    width_deg = lon_max - lon_min
+    height_deg = lat_max - lat_min
+    x0 = lon_max - scale_deg - width_deg * 0.05
+    y0 = lat_min + height_deg * 0.04
+    bar_h = height_deg * 0.012
+
+    # Draw alternating black/white segments.
+    for idx in range(4):
+        x = x0 + idx * segment_deg
+        face = "black" if idx % 2 == 0 else "white"
+        ax.add_patch(
+            Rectangle(
+                (x, y0),
+                segment_deg,
+                bar_h,
+                facecolor=face,
+                edgecolor="black",
+                linewidth=0.8,
+                zorder=9,
+            )
+        )
+
+    # Tick labels for readability and calibration feedback.
+    label_y = y0 - height_deg * 0.012
+    ax.text(x0, label_y, "0", ha="center", va="top", fontsize=8, zorder=10)
+    ax.text(x0 + 2 * segment_deg, label_y, f"{int(2 * segment_km)}", ha="center", va="top", fontsize=8, zorder=10)
+    ax.text(x0 + 4 * segment_deg, label_y, f"{int(scale_km)} km", ha="center", va="top", fontsize=8, zorder=10)
 
 
 def _add_north_arrow(ax, bounds):
@@ -414,6 +453,39 @@ def _add_north_arrow(ax, bounds):
         fontweight="bold",
         arrowprops=dict(facecolor="black", width=2, headwidth=10),
     )
+
+
+def _add_compass_rose(ax, bounds):
+    lon_min, lat_min, lon_max, lat_max = bounds
+    width = lon_max - lon_min
+    height = lat_max - lat_min
+    center_x = lon_max - width * 0.08
+    center_y = lat_max - height * 0.08
+    compass_path = Path(__file__).resolve().parents[2] / "scripts" / "assets" / "compass.png"
+
+    # Prefer branded compass image; fallback to simple N marker if image is unavailable.
+    if compass_path.exists():
+        try:
+            compass_img = plt.imread(str(compass_path))
+            img_w = width * 0.08
+            img_h = height * 0.08
+            ax.imshow(
+                compass_img,
+                extent=(
+                    center_x - img_w / 2,
+                    center_x + img_w / 2,
+                    center_y - img_h / 2,
+                    center_y + img_h / 2,
+                ),
+                zorder=10,
+                interpolation="antialiased",
+            )
+            return
+        except Exception:
+            pass
+
+    ax.text(center_x, center_y, "N", fontsize=11, fontweight="bold", ha="center", va="center", zorder=10)
+
 
 
 def _fetch_open_meteo_station_rainfall(lat, lon, report_start_at, report_end_at):
@@ -444,7 +516,7 @@ def create_reliable_rainfall_map(
     shapefile_path: str,
     report_start_at: str,
     report_end_at: str,
-    title_period_label: str = "OND 2025",
+    title_period_label=None,
 ):
     """
     Create a rainfall map that blends station observations with Open-Meteo forecast totals.
@@ -469,11 +541,14 @@ def create_reliable_rainfall_map(
         county_wards = wards[
             wards[county_col].astype(str).str.strip().str.lower() == county_name.strip().lower()
         ].copy()
+        if county_wards.empty:
+            logger.warning(
+                "county_not_found_for_rainfall_map_fallback",
+                extra={"county_name": county_name},
+            )
+            county_wards = wards.copy()
     else:
         county_wards = wards.copy()
-
-    if county_wards.empty:
-        raise ValueError(f"County '{county_name}' not found in shapefile")
 
     county_boundary = county_wards.dissolve()
     county_polygon = county_boundary.geometry.unary_union
@@ -591,19 +666,26 @@ def create_reliable_rainfall_map(
     ]
     ax.legend(handles=station_legend, loc="lower left", frameon=True, fontsize=9)
 
-    cbar = fig.colorbar(contour, ax=ax, orientation="horizontal", fraction=0.045, pad=0.04)
-    cbar.set_label("Rainfall (mm)", fontsize=10, fontweight="bold")
-
     _add_scale_bar(ax, (lon_min, lat_min, lon_max, lat_max))
     _add_north_arrow(ax, (lon_min, lat_min, lon_max, lat_max))
+    _add_compass_rose(ax, (lon_min, lat_min, lon_max, lat_max))
 
+    start_label = date_cls.fromisoformat(report_start_at).isoformat()
+    end_label = date_cls.fromisoformat(report_end_at).isoformat()
+    period_label = (
+        str(title_period_label).strip()
+        if title_period_label is not None and str(title_period_label).strip()
+        else f"{start_label} to {end_label}"
+    )
     title = (
-        f"{county_name} County Rainfall Map\n"
-        f"Interpolated Rainfall Surface ({title_period_label})"
+        "FORECASTED CUMULATIVE RAINFALL\n"
+        f"VALID ({period_label})"
     )
     ax.set_title(title, fontsize=14, fontweight="bold", pad=16)
-    ax.set_xlabel("Longitude")
-    ax.set_ylabel("Latitude")
+    ax.set_xlabel("")
+    ax.set_ylabel("")
+    ax.set_xticks([])
+    ax.set_yticks([])
     ax.set_xlim(lon_min - margin, lon_max + margin)
     ax.set_ylim(lat_min - margin, lat_max + margin)
     ax.set_aspect("equal")

@@ -13,6 +13,12 @@ export interface UserSettings {
     show_wards: boolean
     show_labels: boolean
     label_font_size: number
+    constituency_border_color: string
+    constituency_border_width: number
+    constituency_border_style: string
+    ward_border_color: string
+    ward_border_width: number
+    ward_border_style: string
 }
 
 export interface SettingsResponse {
@@ -28,6 +34,12 @@ export interface UpdateSettingsPayload {
     show_wards?: boolean
     show_labels?: boolean
     label_font_size?: number
+    constituency_border_color?: string
+    constituency_border_width?: number
+    constituency_border_style?: string
+    ward_border_color?: string
+    ward_border_width?: number
+    ward_border_style?: string
 }
 
 export interface MapPreviewLabel {

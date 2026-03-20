@@ -106,20 +106,6 @@ class Settings(BaseSettings):
         description="Supabase Storage bucket for weather reports"
     )
 
-    # County Data
-    COUNTY_DATA_PATH: ClassVar[Path] = Path(__file__).parent / "data" / "counties.json"
-    
-    @classmethod
-    def load_county_data(cls):
-        with open(cls.COUNTY_DATA_PATH, "r") as f:
-            return json.load(f)
-    
-    # PDF Generator
-    PDF_GENERATOR_PATH: str = Field(
-        default=str(Path(__file__).parent.parent.parent / "pdf_generator"),
-        env="PDF_GENERATOR_PATH"
-    )
-    
     # AI Service
     OPENAI_API_KEY: str = Field(default="", env="OPENAI_API_KEY")
     ANTHROPIC_API_KEY: str = Field(default="", env="ANTHROPIC_API_KEY")

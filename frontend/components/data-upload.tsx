@@ -19,18 +19,14 @@ export function DataUpload({ onBack }: DataUploadProps) {
   const uploadRef = useRef<HTMLInputElement>(null)
 
   const [files, setFiles] = useState<File[]>([])
-  const [window, setWindow] = useState<WeeklyReportWindow | null>(null)
+  const [window, setWindow] = useState<WeeklyReportWindow>(() =>
+    getForecastWindowFromAnyDay(new Date())
+  )
 
   const [step, setStep] =
     useState<"idle" | "uploading" | "done" | "error">("idle")
   const [error, setError] = useState<string | null>(null)
   const [uploadedFiles, setUploadedFiles] = useState<Upload[]>([])
-
-  // auto-calc reporting period from TODAY
-  useEffect(() => {
-    const w = getForecastWindowFromAnyDay(new Date())
-    setWindow(w)
-  }, [])
 
   const handleFileSelect = (fileList: FileList | null) => {
     if (!fileList) return
@@ -95,17 +91,6 @@ export function DataUpload({ onBack }: DataUploadProps) {
             High-resolution weather observation data for ward-level forecasts
           </p>
         </div>
-
-        {!window && (
-          <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4">
-            <p className="text-sm text-amber-700 font-medium">
-              Upload is available on Monday only.
-            </p>
-            <p className="text-xs text-amber-700/90 mt-1">
-              Reporting period is fixed to Tuesday through next Monday.
-            </p>
-          </div>
-        )}
 
         {/* COMBINED REPORTING PERIOD + FILE UPLOAD */}
         {window && (

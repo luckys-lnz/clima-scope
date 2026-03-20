@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, type ReactNode } from "react"
+import Link from "next/link"
 import {
   BarChart3,
   FileText,
@@ -218,6 +219,13 @@ export default function Dashboard() {
               {/* Dropdown */}
               {userMenuOpen && (
                 <div className="absolute right-0 top-12 w-36 bg-card border border-border rounded-lg shadow-lg z-50">
+                  <Link
+                    href="/profile"
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-muted rounded-lg"
+                    onClick={() => setUserMenuOpen(false)}
+                  >
+                    Update Profile
+                  </Link>
                   <button
                     onClick={handleLogout}
                     disabled={isLoggingOut}

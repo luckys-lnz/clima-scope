@@ -199,17 +199,7 @@ export const workflowService = {
         token,
         body: data,
       },
-      body: JSON.stringify(data)
-    })
-
-    const responseData = await response.json()
-    
-    if (!response.ok) {
-      const error = responseData as ValidationError
-      throw new Error(error.detail || "Report generation failed")
-    }
-
-    return responseData
+    )
   },
 
   /**

@@ -19,6 +19,7 @@ export function CountyDetail({ county, reportId, onBack }: CountyDetailProps) {
   const { access_token: token, isLoading: authLoading } = useAuth()
   const [detail, setDetail] = useState<ReportDetailResponse | null>(null)
   const [loading, setLoading] = useState(true)
+  const [regenerating, setRegenerating] = useState(false)
   const [errorMessage, setErrorMessage] = useState("")
 
   useEffect(() => {
@@ -89,6 +90,84 @@ export function CountyDetail({ county, reportId, onBack }: CountyDetailProps) {
       cancelled = true
     }
   }, [token, authLoading, reportId, county])
+
+  // Handle report regeneration
+  const handleRegenerateReport = async () => {
+    if (!token) {
+      setErrorMessage("No active session")
+      return
+    }
+
+    if (!detail) {
+      setErrorMessage("No report data available")
+      return
+    }
+
+    const wk = detail?.observation?.report_week
+    const yr = detail?.observation?.report_year
+    const periodStart = detail?.observation?.report_start_at
+    const periodEnd = detail?.observation?.report_end_at
+
+    if (!wk || !yr || !periodStart || !periodEnd) {
+      setErrorMessage("Missing report period information")
+      return
+    }
+
+    try {
+      setErrorMessage("")
+      setRegenerating(true)
+
+      // Get variables from maps or use defaults
+      const variables = detail.maps?.map(m => m.variable) || ['rainfall', 'tmin', 'tmax']
+
+      // Call your report generation endpoint
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/v1/workflow/generate-report`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            county_name: county,
+            week_number: wk,
+            year: yr,
+            report_start_at: periodStart,
+            report_end_at: periodEnd,
+            variables: variables
+          })
+        }
+      )
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.detail || 'Failed to regenerate report')
+      }
+
+      const result = await response.json()
+
+      // Clear cache for this report
+      if (reportId) {
+        sessionStorage.removeItem(`${COUNTY_DETAIL_CACHE_PREFIX}:report:${reportId}`)
+      }
+      sessionStorage.removeItem(`${COUNTY_DETAIL_CACHE_PREFIX}:county:${String(county).toLowerCase()}`)
+
+      // If a new report ID was returned, navigate to it
+      if (result.report_id || result.id) {
+        // Refresh the page or reload the detail with new report ID
+        window.location.href = `/dashboard?report=${result.report_id || result.id}&county=${encodeURIComponent(county)}`
+      } else {
+        // Just reload to show regenerated data
+        window.location.reload()
+      }
+
+    } catch (e: any) {
+      setErrorMessage(e?.message || "Failed to regenerate report")
+    } finally {
+      setRegenerating(false)
+    }
+  }
 
   const vars = detail?.observation_summary?.variables || {}
   const rainfallTotal = vars.rainfall?.sum ?? detail?.forecast_summary?.rainfall_sum
@@ -265,11 +344,18 @@ export function CountyDetail({ county, reportId, onBack }: CountyDetailProps) {
           <Download className="w-4 h-4" />
           Download PDF
         </button>
-        <button className="flex-1 bg-card hover:bg-muted border border-border text-card-foreground py-2 px-4 rounded-lg font-medium transition-colors flex items-center justify-center gap-2">
-          <RefreshCw className="w-4 h-4" />
-          Regenerate Report
+        
+        {/* Regenerate Report Button with working handler */}
+        <button 
+          onClick={handleRegenerateReport}
+          disabled={regenerating}
+          className="flex-1 bg-card hover:bg-muted border border-border text-card-foreground py-2 px-4 rounded-lg font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+        >
+          <RefreshCw className={`w-4 h-4 ${regenerating ? 'animate-spin' : ''}`} />
+          {regenerating ? 'Regenerating...' : 'Regenerate Report'}
         </button>
       </div>
+      
       {errorMessage && (
         <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 text-sm text-red-600">
           {errorMessage}

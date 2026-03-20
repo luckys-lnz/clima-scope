@@ -235,7 +235,7 @@ def main():
         print("require AI API keys to be configured in the .env file.")
         print("\nTo test those endpoints, ensure:")
         print("1. OPENAI_API_KEY or ANTHROPIC_API_KEY is set in .env")
-        print("2. The pdf_generator package is installed")
+        print("2. Local PDF rendering scripts are available")
         print("3. Database migrations have been applied")
         
     except requests.exceptions.ConnectionError:

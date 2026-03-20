@@ -22,7 +22,20 @@ interface SystemConfigurationProps {
 }
 
 const STORAGE_KEY = "system_settings_cache"
-const STORAGE_VERSION = 3
+const STORAGE_VERSION = 4
+
+const DEFAULT_CONSTITUENCY_BORDER_COLOR = "#1e293b"
+const DEFAULT_CONSTITUENCY_BORDER_WIDTH = 1.2
+const DEFAULT_CONSTITUENCY_BORDER_STYLE = "solid"
+const DEFAULT_WARD_BORDER_COLOR = "#2563eb"
+const DEFAULT_WARD_BORDER_WIDTH = 0.9
+const DEFAULT_WARD_BORDER_STYLE = "dashed"
+
+const BORDER_STYLE_OPTIONS = [
+  { value: "solid", label: "Solid" },
+  { value: "dashed", label: "Dashed" },
+  { value: "dotted", label: "Dotted" },
+]
 
 interface CachedSettings {
   version: number
@@ -33,6 +46,12 @@ interface CachedSettings {
   showWards: boolean
   showLabels: boolean
   labelFontSize: number
+  constituencyBorderColor: string
+  constituencyBorderWidth: number
+  constituencyBorderStyle: string
+  wardBorderColor: string
+  wardBorderWidth: number
+  wardBorderStyle: string
 }
 
 function clampFontSize(value: number): number {
@@ -40,8 +59,19 @@ function clampFontSize(value: number): number {
   return Math.max(6, Math.min(48, Math.round(value)))
 }
 
-const PREVIEW_WIDTH = 340
-const PREVIEW_HEIGHT = 220
+function borderStyleToDasharray(style: string): string | undefined {
+  switch (style) {
+    case "dashed":
+      return "6 4"
+    case "dotted":
+      return "2 4"
+    default:
+      return undefined
+  }
+}
+
+const PREVIEW_WIDTH = 820
+const PREVIEW_HEIGHT = 540
 const PREVIEW_PADDING = 14
 
 type Projector = (point: [number, number]) => [number, number]
@@ -113,6 +143,12 @@ function MapSettingsPreview({
   showWards,
   showLabels,
   labelFontSize,
+  constituencyBorderColor,
+  constituencyBorderWidth,
+  constituencyBorderStyle,
+  wardBorderColor,
+  wardBorderWidth,
+  wardBorderStyle,
   preview,
   previewLoading,
   previewError,
@@ -121,6 +157,12 @@ function MapSettingsPreview({
   showWards: boolean
   showLabels: boolean
   labelFontSize: number
+  constituencyBorderColor: string
+  constituencyBorderWidth: number
+  constituencyBorderStyle: string
+  wardBorderColor: string
+  wardBorderWidth: number
+  wardBorderStyle: string
   preview: MapPreviewResponse | null
   previewLoading: boolean
   previewError: string | null
@@ -141,6 +183,8 @@ function MapSettingsPreview({
       ? geometryToPath(preview!.ward_boundaries || null, projector)
       : ""
   const safeFontSize = clampFontSize(labelFontSize)
+  const constituencyDasharray = borderStyleToDasharray(constituencyBorderStyle)
+  const wardDasharray = borderStyleToDasharray(wardBorderStyle)
   const labels = hasPreview && showLabels ? preview?.labels || [] : []
   const previewTitle = preview?.county
     ? `Live Map Preview (${preview.county} County)`
@@ -175,8 +219,9 @@ function MapSettingsPreview({
               <path
                 d={constituencyPath}
                 fill="none"
-                stroke="#1e293b"
-                strokeWidth="1.2"
+                stroke={constituencyBorderColor}
+                strokeWidth={constituencyBorderWidth}
+                strokeDasharray={constituencyDasharray}
                 opacity="0.9"
               />
             )}
@@ -185,9 +230,9 @@ function MapSettingsPreview({
               <path
                 d={wardPath}
                 fill="none"
-                stroke="#2563eb"
-                strokeWidth="0.9"
-                strokeDasharray="3 2"
+                stroke={wardBorderColor}
+                strokeWidth={wardBorderWidth}
+                strokeDasharray={wardDasharray}
                 opacity="0.8"
               />
             )}
@@ -216,7 +261,12 @@ function MapSettingsPreview({
             />
 
             {showConstituencies && (
-              <g stroke="#1e293b" strokeWidth="1.4" opacity="0.9">
+              <g
+                stroke={constituencyBorderColor}
+                strokeWidth={constituencyBorderWidth}
+                strokeDasharray={constituencyDasharray}
+                opacity="0.9"
+              >
                 <path d="M84,66 L88,176" />
                 <path d="M136,52 L140,193" />
                 <path d="M188,46 L192,198" />
@@ -225,7 +275,12 @@ function MapSettingsPreview({
             )}
 
             {showWards && (
-              <g stroke="#2563eb" strokeWidth="1" strokeDasharray="3 2" opacity="0.8">
+              <g
+                stroke={wardBorderColor}
+                strokeWidth={wardBorderWidth}
+                strokeDasharray={wardDasharray}
+                opacity="0.8"
+              >
                 <path d="M52,102 L286,104" />
                 <path d="M48,132 L292,136" />
                 <path d="M70,82 L272,85" />
@@ -280,6 +335,24 @@ export function SystemConfiguration({ onBack }: SystemConfigurationProps) {
   const [showWards, setShowWards] = useState(cached?.showWards ?? true)
   const [showLabels, setShowLabels] = useState(cached?.showLabels ?? true)
   const [labelFontSize, setLabelFontSize] = useState(cached?.labelFontSize ?? 12)
+  const [constituencyBorderColor, setConstituencyBorderColor] = useState(
+    cached?.constituencyBorderColor || DEFAULT_CONSTITUENCY_BORDER_COLOR
+  )
+  const [constituencyBorderWidth, setConstituencyBorderWidth] = useState(
+    cached?.constituencyBorderWidth ?? DEFAULT_CONSTITUENCY_BORDER_WIDTH
+  )
+  const [constituencyBorderStyle, setConstituencyBorderStyle] = useState(
+    cached?.constituencyBorderStyle || DEFAULT_CONSTITUENCY_BORDER_STYLE
+  )
+  const [wardBorderColor, setWardBorderColor] = useState(
+    cached?.wardBorderColor || DEFAULT_WARD_BORDER_COLOR
+  )
+  const [wardBorderWidth, setWardBorderWidth] = useState(
+    cached?.wardBorderWidth ?? DEFAULT_WARD_BORDER_WIDTH
+  )
+  const [wardBorderStyle, setWardBorderStyle] = useState(
+    cached?.wardBorderStyle || DEFAULT_WARD_BORDER_STYLE
+  )
   const [previewData, setPreviewData] = useState<MapPreviewResponse | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState<string | null>(null)
@@ -307,6 +380,14 @@ export function SystemConfiguration({ onBack }: SystemConfigurationProps) {
           showWards: data.user_settings?.show_wards ?? true,
           showLabels: data.user_settings?.show_labels ?? true,
           labelFontSize: clampFontSize(data.user_settings?.label_font_size ?? 12),
+          constituencyBorderColor: data.user_settings?.constituency_border_color || DEFAULT_CONSTITUENCY_BORDER_COLOR,
+          constituencyBorderWidth:
+            data.user_settings?.constituency_border_width ?? DEFAULT_CONSTITUENCY_BORDER_WIDTH,
+          constituencyBorderStyle:
+            data.user_settings?.constituency_border_style || DEFAULT_CONSTITUENCY_BORDER_STYLE,
+          wardBorderColor: data.user_settings?.ward_border_color || DEFAULT_WARD_BORDER_COLOR,
+          wardBorderWidth: data.user_settings?.ward_border_width ?? DEFAULT_WARD_BORDER_WIDTH,
+          wardBorderStyle: data.user_settings?.ward_border_style || DEFAULT_WARD_BORDER_STYLE,
         }
 
         sessionStorage.setItem(STORAGE_KEY, JSON.stringify(settingsData))
@@ -318,6 +399,12 @@ export function SystemConfiguration({ onBack }: SystemConfigurationProps) {
         setShowWards(settingsData.showWards)
         setShowLabels(settingsData.showLabels)
         setLabelFontSize(settingsData.labelFontSize)
+        setConstituencyBorderColor(settingsData.constituencyBorderColor)
+        setConstituencyBorderWidth(settingsData.constituencyBorderWidth)
+        setConstituencyBorderStyle(settingsData.constituencyBorderStyle)
+        setWardBorderColor(settingsData.wardBorderColor)
+        setWardBorderWidth(settingsData.wardBorderWidth)
+        setWardBorderStyle(settingsData.wardBorderStyle)
         if (!cached) setLoading(false)
       } catch (err) {
         if (!cached) {
@@ -385,6 +472,12 @@ export function SystemConfiguration({ onBack }: SystemConfigurationProps) {
         show_wards: showWards,
         show_labels: showLabels,
         label_font_size: safeFontSize,
+        constituency_border_color: constituencyBorderColor,
+        constituency_border_width: constituencyBorderWidth,
+        constituency_border_style: constituencyBorderStyle,
+        ward_border_color: wardBorderColor,
+        ward_border_width: wardBorderWidth,
+        ward_border_style: wardBorderStyle,
       })
 
       setLabelFontSize(safeFontSize)
@@ -397,6 +490,12 @@ export function SystemConfiguration({ onBack }: SystemConfigurationProps) {
         showWards,
         showLabels,
         labelFontSize: safeFontSize,
+        constituencyBorderColor,
+        constituencyBorderWidth,
+        constituencyBorderStyle,
+        wardBorderColor,
+        wardBorderWidth,
+        wardBorderStyle,
       }
       sessionStorage.setItem(STORAGE_KEY, JSON.stringify(updatedCache))
       setSaveMessage("Settings saved")
@@ -511,6 +610,45 @@ export function SystemConfiguration({ onBack }: SystemConfigurationProps) {
           Show Constituencies
         </label>
 
+        {showConstituencies && (
+          <div className="ml-7 grid gap-4 sm:grid-cols-3">
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">
+                Border Color
+              </label>
+              <input
+                type="text"
+                value={constituencyBorderColor}
+                onChange={(e) => setConstituencyBorderColor(e.target.value)}
+                className="w-full px-4 py-2 rounded-lg border border-border bg-card text-card-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">
+                Border Thickness
+              </label>
+              <input
+                type="number"
+                min={0.1}
+                step={0.1}
+                value={constituencyBorderWidth}
+                onChange={(e) => setConstituencyBorderWidth(Number(e.target.value))}
+                className="w-full px-4 py-2 rounded-lg border border-border bg-card text-card-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">
+                Border Style
+              </label>
+              <SelectInput
+                value={constituencyBorderStyle}
+                onChange={setConstituencyBorderStyle}
+                options={BORDER_STYLE_OPTIONS}
+              />
+            </div>
+          </div>
+        )}
+
         <label className="flex items-center gap-3 text-sm text-foreground">
           <input
             type="checkbox"
@@ -520,6 +658,45 @@ export function SystemConfiguration({ onBack }: SystemConfigurationProps) {
           />
           Show Wards
         </label>
+
+        {showWards && (
+          <div className="ml-7 grid gap-4 sm:grid-cols-3">
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">
+                Border Color
+              </label>
+              <input
+                type="text"
+                value={wardBorderColor}
+                onChange={(e) => setWardBorderColor(e.target.value)}
+                className="w-full px-4 py-2 rounded-lg border border-border bg-card text-card-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">
+                Border Thickness
+              </label>
+              <input
+                type="number"
+                min={0.1}
+                step={0.1}
+                value={wardBorderWidth}
+                onChange={(e) => setWardBorderWidth(Number(e.target.value))}
+                className="w-full px-4 py-2 rounded-lg border border-border bg-card text-card-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">
+                Border Style
+              </label>
+              <SelectInput
+                value={wardBorderStyle}
+                onChange={setWardBorderStyle}
+                options={BORDER_STYLE_OPTIONS}
+              />
+            </div>
+          </div>
+        )}
 
         <label className="flex items-center gap-3 text-sm text-foreground">
           <input
@@ -548,6 +725,12 @@ export function SystemConfiguration({ onBack }: SystemConfigurationProps) {
           showWards={showWards}
           showLabels={showLabels}
           labelFontSize={labelFontSize}
+          constituencyBorderColor={constituencyBorderColor}
+          constituencyBorderWidth={constituencyBorderWidth}
+          constituencyBorderStyle={constituencyBorderStyle}
+          wardBorderColor={wardBorderColor}
+          wardBorderWidth={wardBorderWidth}
+          wardBorderStyle={wardBorderStyle}
           preview={previewData}
           previewLoading={previewLoading}
           previewError={previewError}

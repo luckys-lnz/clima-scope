@@ -305,6 +305,34 @@ export const authService = {
     return user
   },
 
+  // -----------------------
+  // UPDATE PROFILE
+  // -----------------------
+  async updateProfile(token: string, updates: Partial<User>): Promise<User> {
+    const response = await authService.fetchWithAuth(`${API_BASE}/api/v1/auth/profile`, {
+      method: "PUT",
+      token,
+      headers: createJsonHeaders(),
+      body: JSON.stringify(updates),
+    })
+
+    if (!response.ok) {
+      throw new Error(await getErrorMessage(response, "Profile update failed"))
+    }
+
+    const result = (await response.json()) as User
+    if (typeof window !== "undefined") {
+      localStorage.setItem(STORAGE_KEYS.user, JSON.stringify(result))
+      emitAuthState({
+        type: "session_updated",
+        access_token: getStoredAccessToken(),
+        refresh_token: getStoredRefreshToken(),
+        user: result,
+      })
+    }
+    return result
+  },
+
   async getSession(): Promise<Session | null> {
     const refreshToken = getStoredRefreshToken()
 

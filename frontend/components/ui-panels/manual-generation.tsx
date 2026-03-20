@@ -16,7 +16,7 @@ import type { ValidationResponse, MapOutput } from "@/lib/models/workflow"
 interface ManualGenerationProps {
   onBack: () => void
 }
-]
+
 const REPORT_JOB_ACTIVE_KEY = "report_job_active"
 
 export function ManualGeneration({ onBack }: ManualGenerationProps) {
@@ -76,11 +76,6 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
       return
     }
 
-    if (!reportWindow) {
-      setErrorMessage("No active reporting period")
-      return
-    }
-
     addLog(`Stage 1: Aggregating and preparing CSVs for Week ${reportWindow.week}, ${reportWindow.year}…`)
     setIsGenerating(true)
     setErrorMessage("")
@@ -129,7 +124,7 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
 
   // ===== STEP 3: MAP GENERATION (USING WORKFLOW SERVICE) =====
   const handleGenerateMaps = async () => {
-    if (!sessionToken || !reportWindow) return
+    if (!sessionToken) return
 
     addLog("Stage 3: Generating maps…")
     setIsGenerating(true)
@@ -164,7 +159,7 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
 
   // ===== STEP 4: REPORT GENERATION (USING WORKFLOW SERVICE) =====
   const handleGenerateReport = async () => {
-    if (!reportWindow || !sessionToken) {
+    if (!sessionToken) {
       const errorMsg = !sessionToken ? "No active session" : "No active reporting period"
       addLog(`✗ Report generation blocked: ${errorMsg}`)
       setErrorMessage(errorMsg)
