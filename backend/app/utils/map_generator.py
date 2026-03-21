@@ -15,6 +15,9 @@ from datetime import date as date_cls
 import logging
 import httpx
 from shapely.geometry import Point
+from typing import Optional
+
+from app.utils.map_settings import DEFAULT_MAP_SETTINGS, MapSettings, sanitize_map_settings
 
 logger = logging.getLogger(__name__)
 
@@ -81,10 +84,11 @@ def get_calibrated_grid_spacing(bounds, county_name=None):
     return spacing
 
 def create_weather_map(
-    county_name=None, 
+    county_name=None,
     variable='Rain',
     data_file='kenya_3km_weather.csv',
-    shapefile_path='Kenya_county_assemblies_CLEANED.shp'  # ← DYNAMIC PATH!
+    shapefile_path='Kenya_county_assemblies_CLEANED.shp',  # ← DYNAMIC PATH!
+    map_settings: Optional[MapSettings] = None,
 ):
     """
     Create weather map for specified variable and return as bytes
@@ -94,6 +98,7 @@ def create_weather_map(
         variable: 'Rain', 'Tmin', or 'Tmax'
         data_file: Path to CSV data file
         shapefile_path: Path to shapefile (now dynamic!)
+        map_settings: Optional map styling overrides (boundaries, labels, fonts)
     
     Returns:
         Tuple of (image_bytes, filename)
@@ -133,6 +138,8 @@ def create_weather_map(
         title_area = "Kenya"
         print("📍 All Kenya")
     
+    style = sanitize_map_settings(map_settings or DEFAULT_MAP_SETTINGS)
+
     # 3. GRID SPACING
     print("\n📐 Calculating Kenya-calibrated grid spacing...")
     grid_spacing = get_calibrated_grid_spacing(bounds, county_name)
@@ -244,18 +251,24 @@ def create_weather_map(
                                      linewidth=1.2,
                                      alpha=1)
     
-    if 'const' in plot_data.columns:
-        constituencies = plot_data.dissolve(by='const')
-        constituencies.boundary.plot(ax=ax_map,
-                                    color='black',
-                                    linewidth=0.8,
-                                    alpha=0.7)
-    
-    plot_data.boundary.plot(ax=ax_map,
-                           color='blue',
-                           linewidth=0.8,
-                           linestyle=':',
-                           alpha=0.5)
+    constituency_kwargs = {
+        "color": style["constituency_border_color"],
+        "linewidth": style["constituency_border_width"],
+        "linestyle": style["constituency_border_style"],
+        "alpha": 0.7,
+    }
+    if style["show_constituencies"] and "const" in plot_data.columns:
+        constituencies = plot_data.dissolve(by="const")
+        constituencies.boundary.plot(ax=ax_map, **constituency_kwargs)
+
+    ward_kwargs = {
+        "color": style["ward_border_color"],
+        "linewidth": style["ward_border_width"],
+        "linestyle": style["ward_border_style"],
+        "alpha": 0.5,
+    }
+    if style["show_wards"]:
+        plot_data.boundary.plot(ax=ax_map, **ward_kwargs)
     
     # 9. COORDINATE GRID
     ax_map.set_aspect('equal')
@@ -375,10 +388,23 @@ def _extract_station_frame(df: pd.DataFrame) -> pd.DataFrame:
     return stations
 
 
-def _idw_interpolate(stations: pd.DataFrame, grid_x: np.ndarray, grid_y: np.ndarray) -> np.ndarray:
+def _idw_interpolate(
+    stations: pd.DataFrame,
+    grid_x: np.ndarray,
+    grid_y: np.ndarray,
+    power: float = 3.0,
+    k_nearest: int = 5,
+) -> np.ndarray:
     station_lon = stations["lon"].to_numpy()
     station_lat = stations["lat"].to_numpy()
     station_values = stations["blended_rainfall"].to_numpy()
+
+    station_count = len(station_values)
+    if station_count == 0:
+        return np.full_like(grid_x, np.nan, dtype=float)
+
+    k = max(1, min(int(k_nearest), station_count))
+    power = max(1.0, float(power))
 
     interpolated = np.zeros_like(grid_x, dtype=float)
     for i in range(grid_x.shape[0]):
@@ -387,9 +413,15 @@ def _idw_interpolate(stations: pd.DataFrame, grid_x: np.ndarray, grid_y: np.ndar
         dx = gx[:, None] - station_lon[None, :]
         dy = gy[:, None] - station_lat[None, :]
         dist2 = dx * dx + dy * dy
-        dist2 = np.where(dist2 < 1e-12, 1e-12, dist2)
-        weights = 1.0 / dist2
-        interpolated[i, :] = (weights * station_values[None, :]).sum(axis=1) / weights.sum(axis=1)
+
+        # Use only nearest stations to reduce over-smoothing and preserve local contrasts.
+        nearest_idx = np.argpartition(dist2, kth=k - 1, axis=1)[:, :k]
+        nearest_dist2 = np.take_along_axis(dist2, nearest_idx, axis=1)
+        nearest_vals = station_values[nearest_idx]
+
+        nearest_dist2 = np.where(nearest_dist2 < 1e-12, 1e-12, nearest_dist2)
+        weights = 1.0 / np.power(nearest_dist2, power / 2.0)
+        interpolated[i, :] = (weights * nearest_vals).sum(axis=1) / weights.sum(axis=1)
     return interpolated
 
 
@@ -412,7 +444,7 @@ def _add_scale_bar(ax, bounds):
     width_deg = lon_max - lon_min
     height_deg = lat_max - lat_min
     x0 = lon_max - scale_deg - width_deg * 0.05
-    y0 = lat_min + height_deg * 0.04
+    y0 = lat_min + height_deg * 0.08
     bar_h = height_deg * 0.012
 
     # Draw alternating black/white segments.
@@ -432,7 +464,7 @@ def _add_scale_bar(ax, bounds):
         )
 
     # Tick labels for readability and calibration feedback.
-    label_y = y0 - height_deg * 0.012
+    label_y = y0 - height_deg * 0.010
     ax.text(x0, label_y, "0", ha="center", va="top", fontsize=8, zorder=10)
     ax.text(x0 + 2 * segment_deg, label_y, f"{int(2 * segment_km)}", ha="center", va="top", fontsize=8, zorder=10)
     ax.text(x0 + 4 * segment_deg, label_y, f"{int(scale_km)} km", ha="center", va="top", fontsize=8, zorder=10)
@@ -455,36 +487,34 @@ def _add_north_arrow(ax, bounds):
     )
 
 
-def _add_compass_rose(ax, bounds):
-    lon_min, lat_min, lon_max, lat_max = bounds
-    width = lon_max - lon_min
-    height = lat_max - lat_min
-    center_x = lon_max - width * 0.08
-    center_y = lat_max - height * 0.08
+def _add_compass_rose(fig, container_bounds):
+    container_left, container_bottom, container_width, container_height = container_bounds
+    compass_size = min(container_width, container_height) * 0.12
+    compass_left = container_left + 0.012
+    compass_bottom = container_bottom + container_height - compass_size - 0.012
     compass_path = Path(__file__).resolve().parents[2] / "scripts" / "assets" / "compass.png"
 
-    # Prefer branded compass image; fallback to simple N marker if image is unavailable.
+    # Place compass at the container top-left corner outside the map panel.
     if compass_path.exists():
         try:
             compass_img = plt.imread(str(compass_path))
-            img_w = width * 0.08
-            img_h = height * 0.08
-            ax.imshow(
-                compass_img,
-                extent=(
-                    center_x - img_w / 2,
-                    center_x + img_w / 2,
-                    center_y - img_h / 2,
-                    center_y + img_h / 2,
-                ),
-                zorder=10,
-                interpolation="antialiased",
-            )
+            compass_ax = fig.add_axes([compass_left, compass_bottom, compass_size, compass_size], zorder=25)
+            compass_ax.imshow(compass_img, interpolation="antialiased")
+            compass_ax.axis("off")
             return
         except Exception:
             pass
 
-    ax.text(center_x, center_y, "N", fontsize=11, fontweight="bold", ha="center", va="center", zorder=10)
+    fig.text(
+        compass_left + (compass_size / 2.0),
+        compass_bottom + (compass_size / 2.0),
+        "N",
+        fontsize=12,
+        fontweight="bold",
+        ha="center",
+        va="center",
+        zorder=25,
+    )
 
 
 
@@ -517,11 +547,13 @@ def create_reliable_rainfall_map(
     report_start_at: str,
     report_end_at: str,
     title_period_label=None,
+    map_settings: Optional[MapSettings] = None,
 ):
     """
     Create a rainfall map that blends station observations with Open-Meteo forecast totals.
     Includes county/sub-county/ward boundaries, ward labels, station points, interpolated
-    rainfall surface, legend, scale bar, north arrow, and map title.
+    rainfall surface, legend, scale bar, compass, and map title.
+    :param map_settings: Styling tweaks for boundaries and labels per user preferences.
     """
     _ = date_cls.fromisoformat(report_start_at)
     _ = date_cls.fromisoformat(report_end_at)
@@ -549,6 +581,8 @@ def create_reliable_rainfall_map(
             county_wards = wards.copy()
     else:
         county_wards = wards.copy()
+
+    style = sanitize_map_settings(map_settings or DEFAULT_MAP_SETTINGS)
 
     county_boundary = county_wards.dissolve()
     county_polygon = county_boundary.geometry.unary_union
@@ -599,19 +633,53 @@ def create_reliable_rainfall_map(
     lon_lin = np.linspace(lon_min - margin, lon_max + margin, 220)
     lat_lin = np.linspace(lat_min - margin, lat_max + margin, 220)
     grid_x, grid_y = np.meshgrid(lon_lin, lat_lin)
-    grid_z = _idw_interpolate(stations_in_county, grid_x, grid_y)
+    grid_z = _idw_interpolate(stations_in_county, grid_x, grid_y, power=3.0, k_nearest=5)
 
     inside_mask = np.array(
         [county_polygon.contains(Point(x, y)) for x, y in zip(grid_x.ravel(), grid_y.ravel())]
     ).reshape(grid_x.shape)
     grid_z = np.where(inside_mask, grid_z, np.nan)
 
-    fig, ax = plt.subplots(figsize=(14, 14))
+    fig = plt.figure(figsize=(14, 14))
+
+    # Single bordered container (like a div) holding title, legend, map, compass, and scale.
+    container_left, container_bottom, container_width, container_height = 0.04, 0.06, 0.92, 0.88
+    container_pad = 0.02
+    fig.add_artist(
+        Rectangle(
+            (container_left, container_bottom),
+            container_width,
+            container_height,
+            transform=fig.transFigure,
+            fill=False,
+            edgecolor="black",
+            linewidth=1.2,
+            zorder=20,
+        )
+    )
+
+    title_band_h = 0.10 * container_height
+    content_top = container_bottom + container_height - title_band_h - container_pad
+    content_bottom = container_bottom + container_pad
+    content_height = content_top - content_bottom
+
+    legend_w = 0.21 * container_width
+    legend_left = container_left + container_pad
+    legend_bottom = content_bottom + (content_height * 0.16)
+    legend_height = content_height * 0.68
+
+    map_left = legend_left + legend_w + (container_pad * 1.2)
+    map_right = container_left + container_width - container_pad
+    map_width = max(0.40, map_right - map_left)
+    map_height = max(0.40, content_height * 0.86)
+    map_bottom = content_bottom + ((content_height - map_height) / 2.0)
+
+    ax = fig.add_axes([map_left, map_bottom, map_width, map_height])
     thresholds = [0, 10, 20, 30, 40, 60, 80, 100, 130, 160, 200, 260]
     cmap = ListedColormap(
         [
-            "#edf8fb", "#ccece6", "#99d8c9", "#66c2a4", "#41ae76",
-            "#238b45", "#006d2c", "#fef0d9", "#fdcc8a", "#fc8d59", "#d7301f",
+            "#f7fcf5", "#eef9e9", "#e4f6dd", "#d9f2cf", "#cceec1",
+            "#bee9b3", "#afe4a4", "#a0df95", "#91d986", "#82d476", "#73ce67",
         ]
     )
     norm = BoundaryNorm(thresholds, cmap.N)
@@ -628,18 +696,39 @@ def create_reliable_rainfall_map(
     )
 
     county_boundary.boundary.plot(ax=ax, color="black", linewidth=1.8, zorder=4)
-    if subcounty_col:
-        county_wards.dissolve(by=subcounty_col).boundary.plot(
-            ax=ax, color="#303030", linewidth=1.1, zorder=4
-        )
-    county_wards.boundary.plot(ax=ax, color="#0b5ed7", linewidth=0.6, linestyle=":", zorder=4)
+
+    constituency_kwargs = {
+        "color": style["constituency_border_color"],
+        "linewidth": style["constituency_border_width"],
+        "linestyle": style["constituency_border_style"],
+        "zorder": 4,
+    }
+    if style["show_constituencies"] and subcounty_col:
+        county_wards.dissolve(by=subcounty_col).boundary.plot(ax=ax, **constituency_kwargs)
+
+    ward_kwargs = {
+        "color": style["ward_border_color"],
+        "linewidth": style["ward_border_width"],
+        "linestyle": style["ward_border_style"],
+        "zorder": 4,
+    }
+    if style["show_wards"]:
+        county_wards.boundary.plot(ax=ax, **ward_kwargs)
 
     max_labels = 40
-    if ward_col:
+    if ward_col and style["show_labels"]:
         for _, row in county_wards.head(max_labels).iterrows():
             centroid = row.geometry.representative_point()
             label = str(row[ward_col])[:28]
-            ax.text(centroid.x, centroid.y, label, fontsize=6, color="#0b1f33", ha="center", zorder=5)
+            ax.text(
+                centroid.x,
+                centroid.y,
+                label,
+                fontsize=style["label_font_size"],
+                color="#0b1f33",
+                ha="center",
+                zorder=5,
+            )
 
     ax.scatter(
         stations_in_county["lon"],
@@ -652,23 +741,41 @@ def create_reliable_rainfall_map(
         label="Rainfall station",
     )
 
-    station_legend = [
-        Line2D(
-            [0],
-            [0],
-            marker="o",
-            color="black",
-            label="Rainfall station",
-            markerfacecolor="black",
-            markersize=7,
-            linestyle="None",
-        )
+    # Legend panel positioned left-center inside the same container.
+    legend_ax = fig.add_axes([legend_left, legend_bottom, legend_w, legend_height])
+    legend_ax.set_xlim(0, 1)
+    legend_ax.set_ylim(0, 1)
+    legend_ax.axis("off")
+
+    legend_ax.text(
+        0.5,
+        0.97,
+        "Rainfall distribution in mm",
+        ha="center",
+        va="top",
+        fontsize=12,
+        fontweight="bold",
+    )
+
+    legend_items = [
+        ("<5 mm", "#f7fcf5"),
+        ("5-20 mm", "#d9f2cf"),
+        ("21-50 mm", "#afe4a4"),
+        (">50 mm", "#82d476"),
     ]
-    ax.legend(handles=station_legend, loc="lower left", frameon=True, fontsize=9)
+    y = 0.84
+    for label, color in legend_items:
+        legend_ax.add_patch(
+            Rectangle((0.08, y - 0.032), 0.18, 0.065, facecolor=color, edgecolor="black", linewidth=0.9)
+        )
+        legend_ax.text(0.32, y, label, ha="left", va="center", fontsize=11)
+        y -= 0.16
+
+    legend_ax.plot([0.17], [0.16], marker="o", markersize=8, color="black")
+    legend_ax.text(0.32, 0.16, "Rainfall station", ha="left", va="center", fontsize=11)
 
     _add_scale_bar(ax, (lon_min, lat_min, lon_max, lat_max))
-    _add_north_arrow(ax, (lon_min, lat_min, lon_max, lat_max))
-    _add_compass_rose(ax, (lon_min, lat_min, lon_max, lat_max))
+    _add_compass_rose(fig, (container_left, container_bottom, container_width, container_height))
 
     start_label = date_cls.fromisoformat(report_start_at).isoformat()
     end_label = date_cls.fromisoformat(report_end_at).isoformat()
@@ -677,20 +784,29 @@ def create_reliable_rainfall_map(
         if title_period_label is not None and str(title_period_label).strip()
         else f"{start_label} to {end_label}"
     )
-    title = (
-        "FORECASTED CUMULATIVE RAINFALL\n"
-        f"VALID ({period_label})"
+    title = f"FORECASTED CUMULATIVE RAINFALL VALID ({period_label})"
+    # Title is top-center inside the same container.
+    fig.text(
+        container_left + (container_width / 2.0),
+        container_bottom + container_height - (title_band_h / 2.0),
+        title,
+        ha="center",
+        va="center",
+        fontsize=16,
+        fontweight="bold",
     )
-    ax.set_title(title, fontsize=14, fontweight="bold", pad=16)
     ax.set_xlabel("")
     ax.set_ylabel("")
     ax.set_xticks([])
     ax.set_yticks([])
+    ax.set_frame_on(False)
+    for spine in ax.spines.values():
+        spine.set_visible(False)
     ax.set_xlim(lon_min - margin, lon_max + margin)
     ax.set_ylim(lat_min - margin, lat_max + margin)
     ax.set_aspect("equal")
 
-    fig.tight_layout()
+    # Save full composed figure without cropping container edges.
     buffer = io.BytesIO()
     plt.savefig(buffer, format="png", dpi=300, facecolor="white")
     plt.close(fig)

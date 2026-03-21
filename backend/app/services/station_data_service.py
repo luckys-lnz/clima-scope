@@ -270,7 +270,7 @@ def fetch_aggregated_station_data(
     if not settings.AUTO_STATION_FETCH_ENABLED:
         raise ValueError("Automatic station fetch is disabled")
 
-    window_start, window_end = get_three_month_window_from_previous_week(report_start_at)
+    window_start, window_end = get_full_year_window_from_previous_day(report_start_at)
     frames: List[pd.DataFrame] = []
     sources_used: List[str] = []
     errors: List[str] = []
@@ -324,7 +324,7 @@ def fetch_aggregated_station_data(
     combined = pd.concat(frames, ignore_index=True)
     aggregated = _aggregate_station_rainfall(combined, window_start=window_start, window_end=window_end)
     if aggregated.empty:
-        raise ValueError("Fetched station data but no valid rows in the 3-month aggregation window")
+        raise ValueError("Fetched station data but no valid rows in the full-year aggregation window")
 
     metadata = {
         "window_start": window_start,
