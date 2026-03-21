@@ -130,6 +130,11 @@ async def login(user_data: LoginRequest):
                 organization=profile.get("organization", ""),
                 county=profile.get("county"),
                 phone=profile.get("phone"),
+                job_title=profile.get("job_title"),
+                station_name=profile.get("station_name"),
+                station_address=profile.get("station_address"),
+                signoff_email=profile.get("signoff_email"),
+                secondary_email=profile.get("secondary_email"),
             )
         )
     except Exception as e:
@@ -170,6 +175,11 @@ async def get_current_user_profile(user=Depends(get_current_user)):
         organization=profile.get("organization", ""),
         county=profile.get("county"),
         phone=profile.get("phone"),
+        job_title=profile.get("job_title"),
+        station_name=profile.get("station_name"),
+        station_address=profile.get("station_address"),
+        signoff_email=profile.get("signoff_email"),
+        secondary_email=profile.get("secondary_email"),
     )
 
 # -----------------------------
@@ -207,6 +217,10 @@ async def update_profile(updates: ProfileUpdateRequest, user=Depends(get_current
         organization=profile.get("organization", ""),
         county=profile.get("county"),
         phone=profile.get("phone"),
+        job_title=profile.get("job_title"),
+        station_name=profile.get("station_name"),
+        station_address=profile.get("station_address"),
+        signoff_email=profile.get("signoff_email"),
     )
 
 # -----------------------------

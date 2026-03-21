@@ -88,21 +88,6 @@ echo "Installing requirements..."
 pip install -r requirements.txt
 
 # ------------------------------------------------------------------
-# Install pdf_generator (editable)
-# ------------------------------------------------------------------
-
-echo ""
-echo "Installing pdf_generator package..."
-PDF_GEN_PATH="$BACKEND_DIR/scripts/pdf_generator"
-
-if [ -d "$PDF_GEN_PATH" ] && [ -f "$PDF_GEN_PATH/setup.py" ]; then
-    pip install -e "$PDF_GEN_PATH"
-    echo -e "${GREEN}✓ pdf_generator installed${NC}"
-else
-    echo -e "${YELLOW}⚠ pdf_generator not found, skipping${NC}"
-fi
-
-# ------------------------------------------------------------------
 # ENV FILE
 # ------------------------------------------------------------------
 

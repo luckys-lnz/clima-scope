@@ -1,5 +1,5 @@
 "use client"
-
+import Link from "next/link"
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import {
   BarChart3,
@@ -269,7 +269,6 @@ export default function Dashboard() {
                     {getTitle(currentScreen as string)}
                   </h2>
                 </div>
-
                 {/* Right: Avatar vertical */}
                 <div className="relative flex flex-col items-center">
                   <button

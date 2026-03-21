@@ -22,7 +22,7 @@ from app.schemas.workflow import (
 )
 from app.core.config import settings
 from app.utils.map_generator import create_weather_map, create_reliable_rainfall_map
-from app.utils.report_generator import generate_weekly_forecast_pdf
+from app.utils.pdf_renderer import generate_weekly_forecast_pdf
 from app.services.narration_service import (
     generate_report_narration,
     summarize_observation_data,
@@ -803,21 +803,23 @@ async def validate_inputs(
     print("🔍 WORKFLOW VALIDATION STARTED")
     print("="*60)
     
-    supabase = get_supabase_anon()
     supabase_admin = get_supabase_admin()
+    # Use admin client for server-side validation queries to avoid RLS-based false negatives.
+    supabase = supabase_admin
     user_id = user.id if hasattr(user, "id") else user.get("id")
     workflow_status_id: Optional[int] = None
 
-    # Monday-only lock: workflow preparation is run only on Mondays so the
-    # forecast period stays constant (Tuesday -> next Monday).
+    # Allow validation on any day so operators can regenerate reports
+    # or recover workflows mid-week using explicit request dates.
     now = datetime.now()
     if now.weekday() != 0:  # Monday=0
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Step 1 is available on Monday only. "
-                "Reporting period is fixed to Tuesday through next Monday."
-            ),
+        logger.info(
+            "validate_inputs_non_monday_run",
+            extra={
+                "weekday": now.weekday(),
+                "report_start_at": request.report_start_at,
+                "report_end_at": request.report_end_at,
+            },
         )
     
     print(f"👤 User ID: {user_id}")
@@ -899,7 +901,7 @@ async def validate_inputs(
     try:
         user_county = _get_user_county(supabase_admin, user_id=user_id, fallback="Unknown")
         obs_payload = _load_observation_bytes_with_fallback(
-            supabase=supabase,
+            supabase=supabase_admin,
             user_id=user_id,
             report_week=request.report_week,
             report_year=request.report_year,
@@ -938,9 +940,9 @@ async def validate_inputs(
             message="Validation failed: no observation data from upload or TAHMO/KMD/Open-Meteo auto-fetch",
         )
         raise HTTPException(
-            status_code=404,
+            status_code=400,
             detail=(
-                f"No observation data found for week {request.report_week}, {request.report_year}. "
+                f"Validation failed: no observation data for week {request.report_week}, {request.report_year}. "
                 "Upload observations or configure TAHMO/KMD/Open-Meteo auto-fetch."
             ),
         )
@@ -972,7 +974,7 @@ async def validate_inputs(
     print("-"*40)
     
     try:
-        shapes_response = supabase.table("shared_files")\
+        shapes_response = supabase_admin.table("shared_files")\
             .select("id,file_name,file_path,upload_date")\
             .eq("file_type", "shapefile")\
             .order("upload_date", desc=True)\
@@ -999,7 +1001,10 @@ async def validate_inputs(
             status="error",
             message="Validation failed: shapefile not found",
         )
-        raise HTTPException(status_code=404, detail="No shapefile uploaded. Please contact administrator.")
+        raise HTTPException(
+            status_code=400,
+            detail="Validation failed: no shapefile is available in shared_files. Please upload shapefile components.",
+        )
 
     shp = shapes[0]
 
@@ -1207,7 +1212,7 @@ async def generate_maps(
     county_for_fetch = (
         request.county
         if request.county and request.county != "—"
-        else _get_user_county(supabase, user_id=user_id, fallback="Unknown")
+        else _get_user_county(supabase_admin, user_id=user_id, fallback="Unknown")
     )
     resolved_map_csv_bytes: Optional[bytes] = None
     try:
@@ -1230,7 +1235,7 @@ async def generate_maps(
             )
         else:
             obs_payload = _load_observation_bytes_with_fallback(
-                supabase=supabase,
+                supabase=supabase_admin,
                 user_id=user_id,
                 report_week=request.report_week,
                 report_year=request.report_year,
@@ -1273,9 +1278,9 @@ async def generate_maps(
     # =========================
     try:
         shapefile_records = (
-            supabase.table("shared_files")
+            supabase_admin.table("shared_files")
             .select("file_name, file_path")
-            .eq("file_type", "shapefile")
+            .in_("file_type", ["shapefile", "shapefiles"])
             .execute()
         )
 
@@ -1397,7 +1402,7 @@ async def generate_maps(
                     shapefile_path=local_shapefile_path,
                     report_start_at=request.report_start_at,
                     report_end_at=request.report_end_at,
-                    title_period_label="OND 2025",
+                    title_period_label=f"{request.report_start_at} to {request.report_end_at}",
                 )
             else:
                 # Non-rainfall maps use legacy gridded workflow for now.
@@ -1488,7 +1493,7 @@ async def generate_maps(
                 workflow_status_id,
                 stage="generate_maps",
                 status="error",
-                message=f"Failed generating map for variable: {variable}",
+                message=f"Failed generating map for variable: {variable} ({str(e)[:240]})",
             )
             # Continue with other variables
             continue
@@ -1895,10 +1900,19 @@ async def generate_report(
 
     data = {
         "meta": {
-            "station": request.county_name,
-            "county": request.county_name,
+            "station": profile.get("station_name") or request.county_name,
+            "station_name": profile.get("station_name") or request.county_name,
+            "station_address": profile.get("station_address") or "",
+            "county": profile.get("county") or request.county_name,
             "issue_date": issue_date,
             "period": period_str,
+            "period_start": request.report_start_at,
+            "period_end": request.report_end_at,
+        },
+        "profile": {
+            "station_name": profile.get("station_name") or request.county_name,
+            "station_address": profile.get("station_address") or "",
+            "county": profile.get("county") or request.county_name,
         },
         "sub_counties": sub_counties_payload,
         "marine": {

@@ -12,6 +12,9 @@ from app.core.config import settings
 
 OPEN_METEO_GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
 OPEN_METEO_ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
+OPEN_METEO_DAILY_PARAMS = ",".join(
+    ["precipitation_sum", "temperature_2m_max", "temperature_2m_min"]
+)
 
 
 def _resolve_column(columns: List[str], candidates: List[str]) -> Optional[str]:
@@ -36,6 +39,17 @@ def get_three_month_window_from_previous_week(report_start_at: str) -> Tuple[str
     report_start = date.fromisoformat(report_start_at)
     window_end = report_start - timedelta(days=1)
     window_start = window_end - relativedelta(months=3) + timedelta(days=1)
+    return window_start.isoformat(), window_end.isoformat()
+
+
+def get_full_year_window_from_previous_day(report_start_at: str) -> Tuple[str, str]:
+    """
+    Build a full-year window ending at the day before the report starts.
+    Example: report starts on 2026-03-09 -> window spans 2025-03-09 through 2026-03-08.
+    """
+    report_start = date.fromisoformat(report_start_at)
+    window_end = report_start - timedelta(days=1)
+    window_start = window_end - relativedelta(years=1) + timedelta(days=1)
     return window_start.isoformat(), window_end.isoformat()
 
 
@@ -331,4 +345,92 @@ def fetch_aggregated_station_csv_bytes(
         report_start_at=report_start_at,
     )
     csv_bytes = aggregated.to_csv(index=False).encode("utf-8")
+    return csv_bytes, metadata
+
+
+def _two_week_window_from_previous_day(report_start_at: str) -> Tuple[str, str]:
+    report_start = date.fromisoformat(report_start_at)
+    window_end = report_start - timedelta(days=1)
+    window_start = window_end - timedelta(days=13)
+    return window_start.isoformat(), window_end.isoformat()
+
+
+def _fetch_open_meteo_daily_series(
+    lat: float,
+    lon: float,
+    window_start: str,
+    window_end: str,
+) -> Dict[str, List[Any]]:
+    response = httpx.get(
+        OPEN_METEO_ARCHIVE_URL,
+        params={
+            "latitude": round(lat, 6),
+            "longitude": round(lon, 6),
+            "start_date": window_start,
+            "end_date": window_end,
+            "daily": OPEN_METEO_DAILY_PARAMS,
+            "timezone": "Africa/Nairobi",
+        },
+        timeout=settings.STATION_FETCH_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    daily = payload.get("daily", {})
+    if not daily:
+        raise ValueError("Open-Meteo returned no daily data")
+    return daily
+
+
+def fetch_open_meteo_two_week_observations_csv(
+    county_name: str,
+    report_start_at: str,
+) -> Tuple[bytes, Dict[str, Any]]:
+    window_start, window_end = _two_week_window_from_previous_day(report_start_at)
+    center_lat, center_lon = _geocode_county_centroid(county_name)
+    offsets = [
+        (0.0, 0.0),
+        (0.12, 0.0),
+        (-0.12, 0.0),
+        (0.0, 0.12),
+        (0.0, -0.12),
+    ]
+
+    rows: List[Dict[str, Any]] = []
+    for idx, (dlat, dlon) in enumerate(offsets, start=1):
+        lat = center_lat + dlat
+        lon = center_lon + dlon
+        daily = _fetch_open_meteo_daily_series(
+            lat=lat,
+            lon=lon,
+            window_start=window_start,
+            window_end=window_end,
+        )
+        dates = daily.get("time") or []
+        precip = daily.get("precipitation_sum") or []
+        tmax = daily.get("temperature_2m_max") or []
+        tmin = daily.get("temperature_2m_min") or []
+        max_len = max(len(dates), len(precip), len(tmax), len(tmin))
+        for day_index in range(max_len):
+            rows.append(
+                {
+                    "date": dates[day_index] if day_index < len(dates) else "",
+                    "lat": lat,
+                    "lon": lon,
+                    "station_name": f"OpenMeteoGrid{idx}",
+                    "rainfall": precip[day_index] if day_index < len(precip) else "",
+                    "tmin": tmin[day_index] if day_index < len(tmin) else "",
+                    "tmax": tmax[day_index] if day_index < len(tmax) else "",
+                }
+            )
+
+    df = pd.DataFrame(rows)
+    csv_bytes = df.to_csv(index=False).encode("utf-8")
+    metadata = {
+        "window_start": window_start,
+        "window_end": window_end,
+        "sources_used": ["OPEN_METEO_ARCHIVE"],
+        "row_count": len(df),
+        "county_centroid": {"lat": center_lat, "lon": center_lon},
+        "source_type": "open_meteo_two_week",
+    }
     return csv_bytes, metadata

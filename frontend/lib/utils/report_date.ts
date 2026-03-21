@@ -50,20 +50,16 @@ export function getISOWeek(date: Date): number {
   }
   
   /**
-   * Monday-locked report window.
-   * Returns Tue → next Mon only when `today` is Monday; otherwise null.
+   * Resolve the standard report window (Tuesday → next Monday) for any date.
    */
-  export function getCurrentWeeklyReportWindow(today = new Date()): WeeklyReportWindow | null {
-    // Only allow workflow period resolution on Monday.
-    if (today.getDay() !== 1) return null
-
+  export function getCurrentWeeklyReportWindow(today = new Date()): WeeklyReportWindow {
     const day = today.getDay() // 0=Sun,1=Mon,2=Tue...
     const monday = new Date(today)
-  
+
     // Find Monday of the current week
     const diff = day === 0 ? -6 : 1 - day // Sunday → go back 6 days, else 1 - day
     monday.setDate(today.getDate() + diff)
-  
+
     return getWeeklyReportWindowFromMonday(monday)
   }
   
@@ -79,8 +75,8 @@ export function getISOWeek(date: Date): number {
   }
   
   /**
-   * Monday-locked forecast window helper.
+   * Forecast window helper (wraps non-null variant for clarity).
    */
-  export function getForecastWindowFromAnyDay(today = new Date()): WeeklyReportWindow | null {
+  export function getForecastWindowFromAnyDay(today = new Date()): WeeklyReportWindow {
     return getCurrentWeeklyReportWindow(today)
   }
