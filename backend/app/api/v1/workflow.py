@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
 import pandas as pd
+import numpy as np
 import io
 import logging
 import os
@@ -22,6 +23,7 @@ from app.schemas.workflow import (
 )
 from app.core.config import settings
 from app.utils.map_generator import create_weather_map, create_reliable_rainfall_map
+from app.utils.map_settings import DEFAULT_MAP_SETTINGS, sanitize_map_settings
 from app.utils.pdf_renderer import generate_weekly_forecast_pdf
 from app.services.narration_service import (
     generate_report_narration,
@@ -33,8 +35,10 @@ from app.services.open_meteo_service import (
 )
 from app.services.station_data_service import (
     fetch_aggregated_station_csv_bytes,
-    get_three_month_window_from_previous_week,
+    fetch_open_meteo_two_week_observations_csv,
+    get_full_year_window_from_previous_day,
 )
+from app.services.weather_history_service import fetch_recent_station_weather_csv_bytes
 
 router = APIRouter(tags=["Workflow"])
 logger = logging.getLogger(__name__)
@@ -314,6 +318,18 @@ def _build_prepared_csv_frames(df: pd.DataFrame) -> Dict[str, Any]:
     if station_frame.empty:
         raise ValueError("No valid rows after normalizing latitude and longitude.")
 
+    # Historical rows are aggregated per station-location so rainfall uses cumulative totals.
+    station_frame = (
+        station_frame.groupby(["station_name", "lat", "lon"], as_index=False)
+        .agg(
+            rainfall=("rainfall", lambda s: s.sum(min_count=1)),
+            tmin=("tmin", "mean"),
+            tmax=("tmax", "mean"),
+        )
+        .sort_values(["station_name", "lat", "lon"])
+        .reset_index(drop=True)
+    )
+
     map_frame = station_frame.rename(
         columns={
             "lat": "Lat",
@@ -324,10 +340,14 @@ def _build_prepared_csv_frames(df: pd.DataFrame) -> Dict[str, Any]:
         }
     )[["Lat", "Lon", "Rain", "Tmin", "Tmax"]]
 
-    # Ensure single point per cell to avoid duplicate pivot-key collisions in create_weather_map.
+    # Keep one point per coordinate in map input while preserving rainfall totals.
     map_frame = (
         map_frame.groupby(["Lat", "Lon"], as_index=False)
-        .agg({"Rain": "mean", "Tmin": "mean", "Tmax": "mean"})
+        .agg(
+            Rain=("Rain", lambda s: s.sum(min_count=1)),
+            Tmin=("Tmin", "mean"),
+            Tmax=("Tmax", "mean"),
+        )
         .sort_values(["Lat", "Lon"])
         .reset_index(drop=True)
     )
@@ -345,6 +365,114 @@ def _build_prepared_csv_frames(df: pd.DataFrame) -> Dict[str, Any]:
         "map_frame": map_frame,
         "variables": variables,
     }
+
+
+
+
+def _build_recent_station_frame(
+    *,
+    county_name: str,
+    report_start_at: str,
+    supabase_admin,
+) -> pd.DataFrame:
+    """
+    Resolve recent 14-day station behavior used to correct the 1-year historical baseline.
+    Priority:
+    1) daily_weather station/upload/observation rows (recent station reality)
+    2) Open-Meteo 14-day archive fallback
+    """
+    recent_bytes = b""
+    try:
+        recent_bytes, _ = fetch_recent_station_weather_csv_bytes(
+            county_identifier=county_name,
+            report_start_at=report_start_at,
+            supabase_admin=supabase_admin,
+        )
+    except Exception:
+        recent_bytes = b""
+
+    if not recent_bytes:
+        try:
+            recent_bytes, _ = fetch_open_meteo_two_week_observations_csv(
+                county_name=county_name,
+                report_start_at=report_start_at,
+            )
+        except Exception:
+            recent_bytes = b""
+
+    if not recent_bytes:
+        return pd.DataFrame(columns=["lat", "lon", "recent_rainfall"])
+
+    try:
+        recent_df = pd.read_csv(io.BytesIO(recent_bytes))
+    except Exception:
+        return pd.DataFrame(columns=["lat", "lon", "recent_rainfall"])
+
+    lat_col = _resolve_column(recent_df.columns, ["lat", "latitude", "y"])
+    lon_col = _resolve_column(recent_df.columns, ["lon", "lng", "long", "longitude", "x"])
+    rain_col = _resolve_column(recent_df.columns, ["rainfall", "rain", "precipitation", "precip", "rr"])
+    if not lat_col or not lon_col or not rain_col:
+        return pd.DataFrame(columns=["lat", "lon", "recent_rainfall"])
+
+    normalized = pd.DataFrame(
+        {
+            "lat": pd.to_numeric(recent_df[lat_col], errors="coerce"),
+            "lon": pd.to_numeric(recent_df[lon_col], errors="coerce"),
+            "recent_rainfall": pd.to_numeric(recent_df[rain_col], errors="coerce"),
+        }
+    ).dropna(subset=["lat", "lon"])
+
+    if normalized.empty:
+        return pd.DataFrame(columns=["lat", "lon", "recent_rainfall"])
+
+    return (
+        normalized.groupby(["lat", "lon"], as_index=False)
+        .agg(recent_rainfall=("recent_rainfall", lambda s: s.sum(min_count=1)))
+        .dropna(subset=["recent_rainfall"])
+        .reset_index(drop=True)
+    )
+
+
+def _blend_historical_with_recent(
+    map_frame: pd.DataFrame,
+    recent_frame: pd.DataFrame,
+    recent_weight: float = 0.6,
+) -> pd.DataFrame:
+    """
+    Blend 1-year historical rainfall with nearest-point recent 14-day station rainfall.
+    The blended output continues to feed forecast rectification in map_generator.
+    """
+    output = map_frame.copy()
+    if output.empty or "Rain" not in output.columns:
+        return output
+    if recent_frame.empty:
+        return output
+
+    valid_map = output["Rain"].notna()
+    if not valid_map.any():
+        return output
+
+    hist_vals = output["Rain"].to_numpy(dtype=float)
+    map_lat = output["Lat"].to_numpy(dtype=float)
+    map_lon = output["Lon"].to_numpy(dtype=float)
+    rec_lat = recent_frame["lat"].to_numpy(dtype=float)
+    rec_lon = recent_frame["lon"].to_numpy(dtype=float)
+    rec_val = recent_frame["recent_rainfall"].to_numpy(dtype=float)
+    if len(rec_val) == 0:
+        return output
+
+    # Nearest-neighbor mapping from recent station behavior to historical station points.
+    dlat = map_lat[:, None] - rec_lat[None, :]
+    dlon = map_lon[:, None] - rec_lon[None, :]
+    dist2 = (dlat * dlat) + (dlon * dlon)
+    nearest_idx = np.argmin(dist2, axis=1)
+    mapped_recent = rec_val[nearest_idx]
+
+    w = max(0.0, min(1.0, float(recent_weight)))
+    output["RainHistorical"] = output["Rain"]
+    output["RainRecent14"] = mapped_recent
+    output["Rain"] = (hist_vals * (1.0 - w)) + (mapped_recent * w)
+    return output
 
 
 def _persist_csv_cache_artifact(
@@ -749,7 +877,11 @@ async def generate_report_async(
         update_workflow_status_flags(
             supabase_admin=supabase_admin,
             workflow_status_id=workflow_status_id,
-            flags={"generated": False, "completed": False},
+            flags={
+                "generated": False,
+                "completed": False,
+                "generated_report_id": None,
+            },
         )
         append_workflow_log(
             supabase_admin=supabase_admin,
@@ -915,12 +1047,12 @@ async def validate_inputs(
         print(f"✅ Observation source resolved: {source_type}")
         print(f"📁 Label: {obs_payload['observation_label']}")
         if str(source_type).startswith("auto_fetch"):
-            window_start, window_end = get_three_month_window_from_previous_week(
+            window_start, window_end = get_full_year_window_from_previous_day(
                 request.report_start_at
             )
             print(
                 f"🧮 Auto-fetch aggregation window: {window_start} to {window_end} "
-                "(3 months ending previous-week day)"
+                "(full year ending previous-day)"
             )
     except Exception as e:
         print(f"❌ Observation resolution failed: {e}")
@@ -1047,6 +1179,14 @@ async def validate_inputs(
         prepared = _build_prepared_csv_frames(df)
         station_frame = prepared["station_frame"]
         map_frame = prepared["map_frame"]
+
+        # Blend recent 14-day station behavior into the 1-year historical rainfall baseline.
+        recent_frame = _build_recent_station_frame(
+            county_name=user_county,
+            report_start_at=request.report_start_at,
+            supabase_admin=supabase_admin,
+        )
+        map_frame = _blend_historical_with_recent(map_frame, recent_frame)
         found = prepared["variables"]
 
         if not found:
@@ -1088,6 +1228,7 @@ async def validate_inputs(
 
         print(f"✅ Prepared station CSV rows: {len(station_frame)}")
         print(f"✅ Prepared map CSV rows: {len(map_frame)}")
+        print(f"✅ Recent station correction points (14 days): {len(recent_frame)}")
         print(f"✅ Map variables detected: {found}")
     except Exception as e:
         print(f"❌ Failed preparing CSV artifacts: {e}")
@@ -1308,14 +1449,29 @@ async def generate_maps(
             raise ValueError("Resolved map CSV is empty")
         print(f"\n✅ Loaded map input data: {len(file_data)} bytes")
 
+        incoming_df = pd.read_csv(io.BytesIO(file_data))
+        if all(col in incoming_df.columns for col in ["Lat", "Lon", "Rain"]):
+            map_frame = incoming_df.copy()
+        else:
+            map_frame = _build_prepared_csv_frames(incoming_df)["map_frame"]
+
+        # Ensure rainfall map uses: 1-year historical + recent 14-day station correction.
+        if "RainHistorical" not in map_frame.columns or "RainRecent14" not in map_frame.columns:
+            recent_frame = _build_recent_station_frame(
+                county_name=county_for_fetch,
+                report_start_at=request.report_start_at,
+                supabase_admin=supabase_admin,
+            )
+            map_frame = _blend_historical_with_recent(map_frame, recent_frame)
+            print(f"✅ Applied recent 14-day correction points: {len(recent_frame)}")
+
         temp_csv = f"/tmp/weather_data_{user_id}_{request.report_week}.csv"
-        with open(temp_csv, "wb") as f:
-            f.write(file_data)
+        map_frame.to_csv(temp_csv, index=False)
         print(f"✅ Saved temp file: {temp_csv}")
 
     except Exception as e:
-        print(f"❌ Error downloading observation file: {e}")
-        raise HTTPException(status_code=500, detail="Failed to download observation file")
+        print(f"❌ Error preparing map input CSV: {e}")
+        raise HTTPException(status_code=500, detail="Failed to prepare map input CSV")
 
     # =========================
     # 4. DOWNLOAD ALL SHAPEFILE COMPONENTS
@@ -1370,7 +1526,30 @@ async def generate_maps(
         )
 
     # =========================
-    # 5. VARIABLE MAPPING
+    # 5. LOAD USER MAP SETTINGS
+    # =========================
+    map_settings = dict(DEFAULT_MAP_SETTINGS)
+    try:
+        user_settings_response = (
+            supabase_admin.table("user_settings")
+            .select(
+                "show_constituencies, show_wards, show_labels, label_font_size, "
+                "constituency_border_color, constituency_border_width, constituency_border_style, "
+                "ward_border_color, ward_border_width, ward_border_style"
+            )
+            .eq("user_id", user_id)
+            .order("updated_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        user_settings_results = user_settings_response.data or []
+        if user_settings_results:
+            map_settings = sanitize_map_settings(user_settings_results[0])
+    except Exception as e:
+        print(f"⚠️ Failed to load user map settings: {e}")
+
+    # =========================
+    # 6. VARIABLE MAPPING
     # =========================
     var_map = {
         "rainfall": "Rain",
@@ -1379,7 +1558,7 @@ async def generate_maps(
     }
 
     # =========================
-    # 6. GENERATE MAPS FOR EACH VARIABLE
+    # 7. GENERATE MAPS FOR EACH VARIABLE
     # =========================
     outputs: List[MapOutput] = []
 
@@ -1403,6 +1582,7 @@ async def generate_maps(
                     report_start_at=request.report_start_at,
                     report_end_at=request.report_end_at,
                     title_period_label=f"{request.report_start_at} to {request.report_end_at}",
+                    map_settings=map_settings,
                 )
             else:
                 # Non-rainfall maps use legacy gridded workflow for now.
@@ -1411,6 +1591,7 @@ async def generate_maps(
                     variable=col_name,
                     data_file=temp_csv,
                     shapefile_path=local_shapefile_path,
+                    map_settings=map_settings,
                 )
 
             print(f"✅ Map generated: {filename} ({len(image_bytes)} bytes)")

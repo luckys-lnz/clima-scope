@@ -177,6 +177,9 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
     setErrorMessage("")
 
     try {
+      setIsComplete(false)
+      setDownloadUrl("")
+      setDownloadReportId("")
       const startResult = await workflowService.generateReportAsync(sessionToken, {
         county_name: userCounty,
         week_number: reportWindow.week,
@@ -185,6 +188,7 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
         report_end_at: formatDateToISO(reportWindow.end),
         variables: selectedVars
       })
+      const runStartedAt = Date.now()
       addLog(`… ${startResult.message}`)
       addLog("… Monitoring background generation progress")
       if (typeof window !== "undefined") {
@@ -204,8 +208,13 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
             reportWindow.year
           )) as any
           if (!status) return
+          const latestLog = status.latest_log
+          const latestLogTs = latestLog?.created_at
+            ? new Date(latestLog.created_at).getTime()
+            : 0
 
-          if (status.generated_report_id) {
+          // Ignore stale completion records from a prior run.
+          if (status.generated_report_id && latestLogTs >= runStartedAt) {
             const pdfPath = `/api/v1/reports/download/${status.generated_report_id}`
             setDownloadUrl(`${baseUrl}${pdfPath}`)
             setDownloadReportId(status.generated_report_id)
@@ -222,7 +231,6 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
             return
           }
 
-          const latestLog = status.latest_log
           const latestStatus = String(latestLog?.status || "").toLowerCase()
           if (latestStatus === "error" || latestStatus === "failed") {
             setIsGenerating(false)

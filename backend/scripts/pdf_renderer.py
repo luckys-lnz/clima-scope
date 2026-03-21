@@ -86,7 +86,7 @@ def _sanitize_text(text: str) -> str:
     if not text:
         return ""
     # Keep printable ASCII and common Unicode letters, digits, punctuation, and spaces
-    allowed_chars = string.ascii_letters + string.digits + string.punctuation + " °C°–→"  # keep °, dash, arrow
+    allowed_chars = string.ascii_letters + string.digits + string.punctuation + " °C°–"  # keep ° and dash
     return "".join(c for c in text if c in allowed_chars or c.isalpha() or c.isspace())
 
 
@@ -264,14 +264,14 @@ def _format_weekly_summary(text: str, data: dict) -> str:
     morning_phrase = _summarize_morning_conditions(morning_values)
 
     template = (
-        f"→ The county will generally experience {morning_phrase} through the week, "
+        f"&#10148; The county will generally experience {morning_phrase} through the week, "
         "with mostly dry conditions across all sub-counties. Light showers may occur in a few places.<br/><br/>"
-        f"→ Maximum/Daytime temperatures are expected to range from {max_range}°C.<br/><br/>"
-        f"→ Minimum/Night temperatures are expected to range from {min_range}°C.<br/><br/>"
-        f"→ Moderate to strong Northeasterly (NE) to East-Northeasterly (ENE) winds ({wind_range} knots) are expected "
+        f"&#10148; Maximum/Daytime temperatures are expected to range from {max_range}°C.<br/><br/>"
+        f"&#10148; Minimum/Night temperatures are expected to range from {min_range}°C.<br/><br/>"
+        f"&#10148; Moderate to strong Northeasterly (NE) to East-Northeasterly (ENE) winds ({wind_range} knots) are expected "
         "throughout the week.<br/><br/>"
-        "→ Marine users are strongly advised to exercise caution the rest of the week.<br/><br/>"
-        "→ Any significant change in the forecast will be shared in your WhatsApp groups."
+        "&#10148; Marine users are strongly advised to exercise caution the rest of the week.<br/><br/>"
+        "&#10148; Any significant change in the forecast will be shared in your WhatsApp groups."
     )
     sanitized = _sanitize_text(template)
     return sanitized
@@ -342,10 +342,24 @@ def generate_weekly_forecast_pdf(data, narration, map_path, output_path, signoff
         parent=styles["Normal"],
         alignment=0,
         fontName="Helvetica-Bold",
-        fontSize=9,
+        fontSize=10,
         leading=11,
         spaceAfter=2,
     )
+    cover_map_caption_style = ParagraphStyle(
+        name="CoverMapCaption",
+        parent=styles["Normal"],
+        alignment=TA_CENTER,
+        fontName="Helvetica-Bold",
+        fontSize=10,
+        leading=12,
+        spaceAfter=4,
+    )
+
+    def _paragraph_height(text: str, style: ParagraphStyle, width: float) -> float:
+        para = Paragraph(text, style)
+        _, height = para.wrap(width, 10_000)
+        return float(height)
 
     section_style = ParagraphStyle(
         name="SectionHeader",
@@ -364,7 +378,7 @@ def generate_weekly_forecast_pdf(data, narration, map_path, output_path, signoff
         fontSize=10,
         leading=13,
         spaceAfter=6,
-        leftIndent=16,
+        leftIndent=28,
     )
 
     subcounty_title_style = ParagraphStyle(
@@ -378,18 +392,31 @@ def generate_weekly_forecast_pdf(data, narration, map_path, output_path, signoff
     # =========================
     # COVER PAGE
     # =========================
+    # Make cover top margin 30 while preserving normal top margin on subsequent pages.
+    elements.append(Spacer(1, -30))
+    used_cover_height = 0.0
 
     coat_path = _resolve_asset_path("assets/coat_of_arms.png")
     if os.path.exists(coat_path):
-        coat_img = Image(coat_path, width=80, height=80)
+        coat_img = Image(coat_path)
+        coat_img = _scale_image_to_fit(coat_img, 86, 90)
         coat_img.hAlign = "CENTER"
         elements.append(coat_img)
-        elements.append(Spacer(1, 8))
+        used_cover_height += float(coat_img.drawHeight)
+        elements.append(Spacer(1, 6))
+        used_cover_height += 6.0
 
-    elements.append(Paragraph("REPUBLIC OF KENYA", cover_header_style))
-    elements.append(Paragraph("MINISTRY OF ENVIRONMENT CLIMATE CHANGE AND FORESTRY", cover_header_style))
-    elements.append(Paragraph("KENYA METEOROLOGICAL DEPARTMENT", cover_header_style))
+    line_1 = "REPUBLIC OF KENYA"
+    line_2 = "MINISTRY OF ENVIRONMENT CLIMATE CHANGE AND FORESTRY"
+    line_3 = "KENYA METEOROLOGICAL DEPARTMENT"
+    elements.append(Paragraph(line_1, cover_header_style))
+    used_cover_height += _paragraph_height(line_1, cover_header_style, doc.width)
+    elements.append(Paragraph(line_2, cover_header_style))
+    used_cover_height += _paragraph_height(line_2, cover_header_style, doc.width)
+    elements.append(Paragraph(line_3, cover_header_style))
+    used_cover_height += _paragraph_height(line_3, cover_header_style, doc.width)
     elements.append(Spacer(1, 14))
+    used_cover_height += 14.0
 
     profile = data.get("profile") or {}
     station_name = _sanitize_text(
@@ -411,13 +438,20 @@ def generate_weekly_forecast_pdf(data, narration, map_path, output_path, signoff
     )
     if station_name:
         elements.append(Paragraph(station_name, cover_middle_style))
+        used_cover_height += _paragraph_height(station_name, cover_middle_style, doc.width)
     if station_address:
         elements.append(Paragraph(station_address, cover_middle_style))
+        used_cover_height += _paragraph_height(station_address, cover_middle_style, doc.width)
     if county_name:
-        elements.append(Paragraph(f"{county_name.upper()} COUNTY", cover_middle_style))
+        county_line = f"{county_name.upper()} COUNTY"
+        elements.append(Paragraph(county_line, cover_middle_style))
+        used_cover_height += _paragraph_height(county_line, cover_middle_style, doc.width)
 
-    elements.append(Paragraph("WEEKLY WEATHER FORECAST", cover_middle_style))
+    weekly_title = "WEEKLY WEATHER FORECAST"
+    elements.append(Paragraph(weekly_title, cover_middle_style))
+    used_cover_height += _paragraph_height(weekly_title, cover_middle_style, doc.width)
     elements.append(Spacer(1, 10))
+    used_cover_height += 10.0
 
     period_start = _sanitize_text(data["meta"].get("period_start") or "")
     period_end = _sanitize_text(data["meta"].get("period_end") or "")
@@ -428,16 +462,27 @@ def generate_weekly_forecast_pdf(data, narration, map_path, output_path, signoff
             period_start = period_start or _sanitize_text(maybe_start)
             period_end = period_end or _sanitize_text(maybe_end)
 
-    elements.append(Paragraph(f"Date of issue: {_sanitize_text(data['meta'].get('issue_date', ''))}", cover_date_style))
-    elements.append(Paragraph(f"Period of forecast: {period_start} to {period_end}", cover_date_style))
+    issue_line = f"Date of issue: {_sanitize_text(data['meta'].get('issue_date', ''))}"
+    period_line = f"Period of forecast: {period_start} to {period_end}"
+    elements.append(Paragraph(issue_line, cover_date_style))
+    used_cover_height += _paragraph_height(issue_line, cover_date_style, doc.width)
+    elements.append(Paragraph(period_line, cover_date_style))
+    used_cover_height += _paragraph_height(period_line, cover_date_style, doc.width)
     elements.append(Spacer(1, 6))
+    used_cover_height += 6.0
 
     if map_path:
+        elements.append(Spacer(1, 10))
+        used_cover_height += 10.0
         map_img = Image(map_path)
-        # Fill remaining cover-page space as much as possible after the header sections.
-        map_img = _scale_image_to_fit(map_img, doc.width, doc.height * 0.62)
+        # Use as much cover area as possible without colliding with surrounding content.
+        map_box_width = doc.width
+        map_box_height = max(140.0, doc.height - used_cover_height - 8.0)
+        map_img = _scale_image_to_fit(map_img, map_box_width, map_box_height)
+
         map_img.hAlign = "CENTER"
         elements.append(map_img)
+        elements.append(Spacer(1, 8))
 
     elements.append(PageBreak())
 

@@ -18,31 +18,11 @@ import shutil
 import geopandas as gpd
 from shapely.geometry import mapping
 
+from app.utils.map_settings import DEFAULT_MAP_SETTINGS, sanitize_map_settings
+
 router = APIRouter(tags=["setting"])
 logger = logging.getLogger(__name__)
 
-DEFAULT_MAP_SETTINGS = {
-    "show_constituencies": True,
-    "show_wards": True,
-    "show_labels": True,
-    "label_font_size": 12,
-}
-
-
-def _sanitize_map_settings(row: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    payload = row or {}
-    font_size_raw = payload.get("label_font_size", DEFAULT_MAP_SETTINGS["label_font_size"])
-    try:
-        font_size = int(font_size_raw)
-    except (TypeError, ValueError):
-        font_size = DEFAULT_MAP_SETTINGS["label_font_size"]
-    font_size = max(6, min(48, font_size))
-    return {
-        "show_constituencies": bool(payload.get("show_constituencies", DEFAULT_MAP_SETTINGS["show_constituencies"])),
-        "show_wards": bool(payload.get("show_wards", DEFAULT_MAP_SETTINGS["show_wards"])),
-        "show_labels": bool(payload.get("show_labels", DEFAULT_MAP_SETTINGS["show_labels"])),
-        "label_font_size": font_size,
-    }
 
 
 def _resolve_column(columns: List[str], candidates: List[str]) -> Optional[str]:
@@ -105,7 +85,11 @@ async def get_settings(user=Depends(get_current_user)):
     # Get user's assigned template and map display preferences from user_settings
     try:
         user_settings_response = supabase.table("user_settings")\
-            .select("pdf_template_id, show_constituencies, show_wards, show_labels, label_font_size")\
+            .select(
+                "pdf_template_id, show_constituencies, show_wards, show_labels, label_font_size, "
+                "constituency_border_color, constituency_border_width, constituency_border_style, "
+                "ward_border_color, ward_border_width, ward_border_style"
+            )\
             .eq("user_id", user_id)\
             .order("updated_at", desc=True)\
             .limit(1)\
@@ -114,7 +98,7 @@ async def get_settings(user=Depends(get_current_user)):
         user_settings_results = user_settings_response.data or []
         user_settings_row = user_settings_results[0] if user_settings_results else {}
         selected_template_id = user_settings_row.get("pdf_template_id")
-        map_settings = _sanitize_map_settings(user_settings_row)
+        map_settings = sanitize_map_settings(user_settings_row)
     except Exception as e:
         logger.error(f"Error fetching user settings: {e}")
         selected_template_id = None
@@ -352,11 +336,17 @@ async def update_settings(
             .execute()
         
         existing = existing_response.data or []
-        effective_map_settings = _sanitize_map_settings({
+        effective_map_settings = sanitize_map_settings({
             "show_constituencies": payload.show_constituencies,
             "show_wards": payload.show_wards,
             "show_labels": payload.show_labels,
             "label_font_size": payload.label_font_size,
+            "constituency_border_color": payload.constituency_border_color,
+            "constituency_border_width": payload.constituency_border_width,
+            "constituency_border_style": payload.constituency_border_style,
+            "ward_border_color": payload.ward_border_color,
+            "ward_border_width": payload.ward_border_width,
+            "ward_border_style": payload.ward_border_style,
         })
         
         update_data = {

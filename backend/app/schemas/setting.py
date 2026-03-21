@@ -19,6 +19,12 @@ class UserSettingsResponse(BaseModel):
     show_wards: bool = True
     show_labels: bool = True
     label_font_size: int = 12
+    constituency_border_color: str = "#1e293b"
+    constituency_border_width: float = 1.2
+    constituency_border_style: str = "solid"
+    ward_border_color: str = "#2563eb"
+    ward_border_width: float = 0.9
+    ward_border_style: str = "dashed"
 
 
 class SettingsResponse(BaseModel):
@@ -49,3 +55,9 @@ class UpdateSettingsRequest(BaseModel):
     show_wards: Optional[bool] = None
     show_labels: Optional[bool] = None
     label_font_size: Optional[int] = Field(default=None, ge=6, le=48)
+    constituency_border_color: Optional[str] = None
+    constituency_border_width: Optional[float] = None
+    constituency_border_style: Optional[str] = None
+    ward_border_color: Optional[str] = None
+    ward_border_width: Optional[float] = None
+    ward_border_style: Optional[str] = None
