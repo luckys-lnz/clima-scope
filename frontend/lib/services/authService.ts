@@ -49,12 +49,14 @@ export interface Session {
 }
 
 export type AuthStateEventType = "session_updated" | "session_cleared"
+export type AuthClearReason = "logout" | "expired" | "manual"
 
 export interface AuthStateEventDetail {
   type: AuthStateEventType
   access_token: string | null
   refresh_token: string | null
   user: User | null
+  reason?: AuthClearReason
 }
 
 export interface AuthFetchOptions extends Omit<RequestInit, "headers"> {
@@ -69,6 +71,7 @@ export interface JsonAuthRequestOptions<TBody>
 }
 
 let refreshInFlight: Promise<RefreshResponse> | null = null
+let lastClearReason: AuthClearReason | null = null
 
 const clearCacheEntries = (keys: readonly CacheKey[]): void => {
   if (typeof window === "undefined") return
@@ -88,6 +91,7 @@ const setSession = (
   user?: User,
 ): void => {
   if (typeof window === "undefined") return
+  lastClearReason = null
   localStorage.setItem(STORAGE_KEYS.accessToken, accessToken)
   localStorage.setItem(STORAGE_KEYS.refreshToken, refreshToken)
   if (user) {
@@ -124,8 +128,9 @@ const getStoredUser = (): User | null => {
   }
 }
 
-const clearSessionStorage = (): void => {
+const clearSessionStorage = (reason: AuthClearReason = "manual"): void => {
   if (typeof window === "undefined") return
+  lastClearReason = reason
   localStorage.removeItem(STORAGE_KEYS.accessToken)
   localStorage.removeItem(STORAGE_KEYS.refreshToken)
   localStorage.removeItem(STORAGE_KEYS.user)
@@ -134,6 +139,7 @@ const clearSessionStorage = (): void => {
     access_token: null,
     refresh_token: null,
     user: null,
+    reason,
   })
 }
 
@@ -216,9 +222,13 @@ const refreshWithToken = (refreshToken: string): Promise<RefreshResponse> => {
 }
 
 export const authService = {
-  clearSession(): void {
-    clearSessionStorage()
+  clearSession(reason: AuthClearReason = "manual"): void {
+    clearSessionStorage(reason)
     clearCacheEntries([DASHBOARD_CACHE_KEY, REPORTS_CACHE_KEY, SETTINGS_CACHE_KEY])
+  },
+
+  getLastClearReason(): AuthClearReason | null {
+    return lastClearReason
   },
 
   isTokenExpired(token: string, leewayMs = 0): boolean {
@@ -278,7 +288,7 @@ export const authService = {
         throw new Error(await getErrorMessage(response, "Logout failed"))
       }
     } finally {
-      authService.clearSession()
+      authService.clearSession("logout")
     }
   },
 
@@ -350,7 +360,7 @@ export const authService = {
       }
 
       if (!user) {
-        authService.clearSession()
+        authService.clearSession("expired")
         return null
       }
 
@@ -360,7 +370,7 @@ export const authService = {
         refresh_token: getStoredRefreshToken() ?? refreshToken,
       }
     } catch {
-      authService.clearSession()
+      authService.clearSession("expired")
       return null
     }
   },
@@ -418,7 +428,7 @@ export const authService = {
       return response
     } catch (error) {
       if (error instanceof Error && error.message.includes("Session expired")) {
-        authService.clearSession()
+        authService.clearSession("expired")
       }
       throw error
     }

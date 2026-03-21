@@ -222,22 +222,30 @@ export const workflowService = {
     report_year: number
     message: string
   }> => {
-    const response = await fetch(`${API_BASE}/api/v1/workflow/generate-report-async`, {
+    const response = await authService.fetchWithAuth(
+      `${API_BASE}/api/v1/workflow/generate-report-async`,
+      {
       method: "POST",
-      headers: {
-        "Authorization": `Bearer ${token}`,
-        "Content-Type": "application/json"
-      },
+        token,
       body: JSON.stringify(data)
-    })
-
-    const responseData = await response.json()
+      },
+    )
 
     if (!response.ok) {
-      const error = responseData as ValidationError
-      throw new Error(error.detail || "Failed to start background report generation")
+      throw new Error(
+        await getResponseErrorMessage(
+          response,
+          "Failed to start background report generation",
+        ),
+      )
     }
 
-    return responseData
+    return (await response.json()) as {
+      accepted: boolean
+      workflow_status_id?: number
+      report_week: number
+      report_year: number
+      message: string
+    }
   }
 }
