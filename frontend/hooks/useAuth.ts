@@ -5,26 +5,37 @@ import {
   AUTH_STATE_EVENT,
   authService,
   type AuthStateEventDetail,
+  type AuthClearReason,
 } from "@/lib/services/authService"
 import type { User } from "@/lib/models/auth"
+
+type AuthStatus = "loading" | "authenticated" | "unauthenticated" | "expired"
 
 interface AuthState {
   user: User | null
   access_token: string | null
   refresh_token: string | null
   isLoading: boolean
+  status: AuthStatus
+  clearReason: AuthClearReason | null
 }
 
 const EMPTY_AUTH_STATE: Readonly<Omit<AuthState, "isLoading">> = {
   user: null,
   access_token: null,
   refresh_token: null,
+  status: "unauthenticated",
+  clearReason: null,
 }
+
+const resolveStatus = (reason?: AuthClearReason | null): AuthStatus =>
+  reason === "expired" ? "expired" : "unauthenticated"
 
 export function useAuth() {
   const [auth, setAuth] = useState<AuthState>({
     ...EMPTY_AUTH_STATE,
     isLoading: true,
+    status: "loading",
   })
 
   useEffect(() => {
@@ -34,10 +45,13 @@ export function useAuth() {
       try {
         const session = await authService.getSession()
         if (!session) {
+          const reason = authService.getLastClearReason()
           if (isMounted) {
             setAuth({
               ...EMPTY_AUTH_STATE,
               isLoading: false,
+              status: resolveStatus(reason),
+              clearReason: reason,
             })
           }
           return
@@ -49,15 +63,19 @@ export function useAuth() {
             access_token: session.access_token,
             refresh_token: session.refresh_token,
             isLoading: false,
+            status: "authenticated",
+            clearReason: null,
           })
         }
       } catch (error) {
         console.error("Auth initialization error:", error)
-        authService.clearSession()
+        authService.clearSession("manual")
         if (isMounted) {
           setAuth({
             ...EMPTY_AUTH_STATE,
             isLoading: false,
+            status: "unauthenticated",
+            clearReason: "manual",
           })
         }
       }
@@ -79,9 +97,12 @@ export function useAuth() {
       if (!detail) return
 
       if (detail.type === "session_cleared") {
+        const reason = detail.reason ?? null
         setAuth({
           ...EMPTY_AUTH_STATE,
           isLoading: false,
+          status: resolveStatus(reason),
+          clearReason: reason,
         })
         return
       }
@@ -91,6 +112,8 @@ export function useAuth() {
         access_token: detail.access_token ?? prev.access_token,
         refresh_token: detail.refresh_token ?? prev.refresh_token,
         isLoading: false,
+        status: "authenticated",
+        clearReason: null,
       }))
     }
 
@@ -111,6 +134,8 @@ export function useAuth() {
       access_token: response.access_token,
       refresh_token: response.refresh_token,
       isLoading: false,
+      status: "authenticated",
+      clearReason: null,
     })
     return response.user
   }, [])
@@ -122,16 +147,11 @@ export function useAuth() {
       if (token) {
         await authService.logout(token)
       } else {
-        authService.clearSession()
+        authService.clearSession("logout")
       }
     } catch (error) {
       console.error("Logout error:", error)
-      authService.clearSession()
-    } finally {
-      setAuth({
-        ...EMPTY_AUTH_STATE,
-        isLoading: false,
-      })
+      authService.clearSession("logout")
     }
   }, [auth.access_token])
 
@@ -141,6 +161,8 @@ export function useAuth() {
     access_token: auth.access_token,
     refresh_token: auth.refresh_token,
     isLoading: auth.isLoading,
+    status: auth.status,
+    clearReason: auth.clearReason,
     login,
     logout,
   }
