@@ -716,7 +716,28 @@ def create_reliable_rainfall_map(
         county_wards.boundary.plot(ax=ax, **ward_kwargs)
 
     max_labels = 40
-    if ward_col and style["show_labels"]:
+    if subcounty_col and style["show_constituency_labels"]:
+        const_labels = county_wards.dissolve(by=subcounty_col)
+        count = 0
+        for const_name, row in const_labels.iterrows():
+            if count >= max_labels:
+                break
+            if row.geometry is None:
+                continue
+            centroid = row.geometry.representative_point()
+            label_text = str(const_name)[:28]
+            ax.text(
+                centroid.x,
+                centroid.y,
+                label_text,
+                fontsize=style["constituency_label_font_size"],
+                color=style["constituency_border_color"],
+                ha="center",
+                zorder=5,
+            )
+            count += 1
+
+    if ward_col and style["show_ward_labels"]:
         for _, row in county_wards.head(max_labels).iterrows():
             centroid = row.geometry.representative_point()
             label = str(row[ward_col])[:28]
@@ -724,8 +745,8 @@ def create_reliable_rainfall_map(
                 centroid.x,
                 centroid.y,
                 label,
-                fontsize=style["label_font_size"],
-                color="#0b1f33",
+                fontsize=style["ward_label_font_size"],
+                color=style["ward_border_color"],
                 ha="center",
                 zorder=5,
             )

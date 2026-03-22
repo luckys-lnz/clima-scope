@@ -17,8 +17,10 @@ class UserSettingsResponse(BaseModel):
     selected_template: Optional[SharedFileResponse] = None
     show_constituencies: bool = True
     show_wards: bool = True
-    show_labels: bool = True
-    label_font_size: int = 12
+    show_constituency_labels: bool = True
+    show_ward_labels: bool = True
+    constituency_label_font_size: int = 12
+    ward_label_font_size: int = 12
     constituency_border_color: str = "#1e293b"
     constituency_border_width: float = 1.2
     constituency_border_style: str = "solid"
@@ -38,6 +40,7 @@ class MapPreviewLabel(BaseModel):
     name: str
     lon: float
     lat: float
+    type: Optional[str] = None
 
 
 class MapPreviewResponse(BaseModel):
@@ -53,8 +56,10 @@ class UpdateSettingsRequest(BaseModel):
     pdf_template_id: Optional[UUID] = None
     show_constituencies: Optional[bool] = None
     show_wards: Optional[bool] = None
-    show_labels: Optional[bool] = None
-    label_font_size: Optional[int] = Field(default=None, ge=6, le=48)
+    show_constituency_labels: Optional[bool] = None
+    show_ward_labels: Optional[bool] = None
+    constituency_label_font_size: Optional[int] = Field(default=None, ge=6, le=48)
+    ward_label_font_size: Optional[int] = Field(default=None, ge=6, le=48)
     constituency_border_color: Optional[str] = None
     constituency_border_width: Optional[float] = None
     constituency_border_style: Optional[str] = None

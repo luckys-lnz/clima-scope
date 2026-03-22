@@ -28,6 +28,15 @@ interface GenerateReportPayload {
   variables: string[]
 }
 
+interface GenerateReportAsyncPayload {
+  county_name: string
+  week_number: number
+  year: number
+  report_start_at: string
+  report_end_at: string
+  variables: string[]
+}
+
 interface WorkflowStageStatus {
   stage: string
   status: string
@@ -207,14 +216,7 @@ export const workflowService = {
    */
   generateReportAsync: async (
     token: string,
-    data: {
-      county_name: string
-      week_number: number
-      year: number
-      report_start_at: string
-      report_end_at: string
-      variables: string[]
-    }
+    data: GenerateReportAsyncPayload,
   ): Promise<{
     accepted: boolean
     workflow_status_id?: number
@@ -222,30 +224,22 @@ export const workflowService = {
     report_year: number
     message: string
   }> => {
-    const response = await authService.fetchWithAuth(
+    return authService.requestJsonWithAuth<
+      {
+        accepted: boolean
+        workflow_status_id?: number
+        report_week: number
+        report_year: number
+        message: string
+      },
+      GenerateReportAsyncPayload
+    >(
       `${API_BASE}/api/v1/workflow/generate-report-async`,
       {
-      method: "POST",
+        method: "POST",
         token,
-      body: JSON.stringify(data)
+        body: data,
       },
     )
-
-    if (!response.ok) {
-      throw new Error(
-        await getResponseErrorMessage(
-          response,
-          "Failed to start background report generation",
-        ),
-      )
-    }
-
-    return (await response.json()) as {
-      accepted: boolean
-      workflow_status_id?: number
-      report_week: number
-      report_year: number
-      message: string
-    }
   }
 }

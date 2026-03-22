@@ -1,5 +1,4 @@
 # backend/app/schemas/upload.py
-<<<<<<< HEAD
 
 from pydantic import BaseModel
 from datetime import datetime, date
@@ -23,15 +22,3 @@ class UploadResponse(BaseModel):
 
     class Config:
         orm_mode = True
-=======
-from pydantic import BaseModel
-from uuid import UUID
-from datetime import datetime
-
-class UploadResponse(BaseModel):
-    id: UUID
-    file_name: str
-    file_type: str
-    status: str
-    upload_date: datetime
->>>>>>> main

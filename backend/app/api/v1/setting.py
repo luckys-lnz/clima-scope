@@ -86,7 +86,9 @@ async def get_settings(user=Depends(get_current_user)):
     try:
         user_settings_response = supabase.table("user_settings")\
             .select(
-                "pdf_template_id, show_constituencies, show_wards, show_labels, label_font_size, "
+                "pdf_template_id, show_constituencies, show_wards, "
+                "show_constituency_labels, show_ward_labels, "
+                "constituency_label_font_size, ward_label_font_size, "
                 "constituency_border_color, constituency_border_width, constituency_border_style, "
                 "ward_border_color, ward_border_width, ward_border_style"
             )\
@@ -276,7 +278,23 @@ async def get_preview_geometry(
                     point = row.geometry.representative_point()
                     name = str(row[ward_col])[:28]
                     labels.append(
-                        MapPreviewLabel(name=name, lon=float(point.x), lat=float(point.y))
+                        MapPreviewLabel(name=name, lon=float(point.x), lat=float(point.y), type="ward")
+                    )
+                except Exception:
+                    continue
+        if constituency_col:
+            constituency_labels = county_wards.dissolve(by=constituency_col)
+            for _, row in constituency_labels.iterrows():
+                try:
+                    centroid = row.geometry.representative_point()
+                    name = str(row.name)[:28]
+                    labels.append(
+                        MapPreviewLabel(
+                            name=name,
+                            lon=float(centroid.x),
+                            lat=float(centroid.y),
+                            type="constituency",
+                        )
                     )
                 except Exception:
                     continue
@@ -339,8 +357,10 @@ async def update_settings(
         effective_map_settings = sanitize_map_settings({
             "show_constituencies": payload.show_constituencies,
             "show_wards": payload.show_wards,
-            "show_labels": payload.show_labels,
-            "label_font_size": payload.label_font_size,
+            "show_constituency_labels": payload.show_constituency_labels,
+            "show_ward_labels": payload.show_ward_labels,
+            "constituency_label_font_size": payload.constituency_label_font_size,
+            "ward_label_font_size": payload.ward_label_font_size,
             "constituency_border_color": payload.constituency_border_color,
             "constituency_border_width": payload.constituency_border_width,
             "constituency_border_style": payload.constituency_border_style,
@@ -375,8 +395,10 @@ async def update_settings(
             f"Updated settings for user {user_id}: template={payload.pdf_template_id}, "
             f"show_constituencies={effective_map_settings['show_constituencies']}, "
             f"show_wards={effective_map_settings['show_wards']}, "
-            f"show_labels={effective_map_settings['show_labels']}, "
-            f"label_font_size={effective_map_settings['label_font_size']}"
+            f"show_constituency_labels={effective_map_settings['show_constituency_labels']}, "
+            f"show_ward_labels={effective_map_settings['show_ward_labels']}, "
+            f"constituency_label_font_size={effective_map_settings['constituency_label_font_size']}, "
+            f"ward_label_font_size={effective_map_settings['ward_label_font_size']}"
         )
         
         return {

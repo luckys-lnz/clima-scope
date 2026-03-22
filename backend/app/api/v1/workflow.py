@@ -1533,7 +1533,9 @@ async def generate_maps(
         user_settings_response = (
             supabase_admin.table("user_settings")
             .select(
-                "show_constituencies, show_wards, show_labels, label_font_size, "
+                "show_constituencies, show_wards, "
+                "show_constituency_labels, show_ward_labels, "
+                "constituency_label_font_size, ward_label_font_size, "
                 "constituency_border_color, constituency_border_width, constituency_border_style, "
                 "ward_border_color, ward_border_width, ward_border_style"
             )
