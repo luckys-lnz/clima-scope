@@ -1,0 +1,401 @@
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
+from datetime import timedelta, datetime
+from typing import List
+from uuid import UUID
+import io
+import pandas as pd
+
+from app.schemas.report import ReportArchiveItem
+from app.api.v1.auth import get_current_user
+from app.core.supabase import get_supabase_anon
+from app.core.config import settings
+from app.services.narration_service import summarize_observation_data, generate_report_narration
+from app.services.open_meteo_service import fetch_daily_forecast, centroid_from_rows
+
+router = APIRouter(tags=["reports"])
+
+
+def _resolve_column(columns, candidates):
+    lowered = {str(col).strip().lower(): str(col) for col in columns}
+    for candidate in candidates:
+        key = candidate.lower()
+        if key in lowered:
+            return lowered[key]
+    for candidate in candidates:
+        key = candidate.lower()
+        for lower_name, original in lowered.items():
+            if key in lower_name:
+                return original
+    return None
+
+
+def _extract_centroid_from_observation_csv(csv_bytes: bytes):
+    try:
+        df = pd.read_csv(io.BytesIO(csv_bytes))
+    except Exception:
+        return None
+
+    lat_col = _resolve_column(df.columns, ["lat", "latitude", "y"])
+    lon_col = _resolve_column(df.columns, ["lon", "lng", "long", "longitude", "x"])
+    if not lat_col or not lon_col:
+        return None
+
+    latitudes = pd.to_numeric(df[lat_col], errors="coerce").dropna().tolist()
+    longitudes = pd.to_numeric(df[lon_col], errors="coerce").dropna().tolist()
+    if not latitudes or not longitudes:
+        return None
+
+    lat, lon = centroid_from_rows(latitudes, longitudes)
+    return {"lat": float(lat), "lon": float(lon)}
+
+
+@router.get("", response_model=List[ReportArchiveItem])
+async def get_user_reports(user=Depends(get_current_user)):
+    """
+    Return list of reports for the current user
+    """
+    supabase = get_supabase_anon()
+    user_id = user.id if hasattr(user, "id") else user.get("id")
+
+    # ---- get user county ----
+    try:
+        profile_response = supabase.table("profiles")\
+            .select("county")\
+            .eq("id", user_id)\
+            .execute()
+        
+        county = profile_response.data[0]["county"] if profile_response.data else "Unknown"
+    except Exception as e:
+        print(f"Error fetching user county: {e}")
+        county = "Unknown"
+
+    # ---- get user's reports ----
+    try:
+        reports_response = supabase.table("generated_reports")\
+            .select("id, generated_at, status, file_path")\
+            .eq("user_id", user_id)\
+            .order("generated_at", desc=True)\
+            .execute()
+        
+        rows = reports_response.data or []
+    except Exception as e:
+        print(f"Error fetching reports: {e}")
+        rows = []
+
+    reports: List[ReportArchiveItem] = []
+
+    for r in rows:
+        gen_date = r.get("generated_at")
+        if not gen_date:
+            continue
+
+        # Convert ISO string to datetime if necessary
+        if isinstance(gen_date, str):
+            try:
+                gen_date = datetime.fromisoformat(gen_date.replace("Z", "+00:00"))
+            except ValueError:
+                # Fallback for different date formats
+                gen_date = datetime.now()
+
+        period_start = gen_date + timedelta(days=1)
+        period_end = gen_date + timedelta(days=7)
+
+        reports.append(
+            ReportArchiveItem(
+                id=r["id"],
+                county=county,
+                generatedAt=gen_date,
+                periodStart=period_start.date(),
+                periodEnd=period_end.date(),
+                status=r.get("status", "completed"),
+                pdfUrl=f"/api/v1/reports/download/{r['id']}",  # secure download URL
+            )
+        )
+
+    return reports
+
+
+@router.get("/detail/{report_id}")
+async def get_report_detail(report_id: UUID, user=Depends(get_current_user)):
+    """
+    Return dynamic detail payload for a specific generated report.
+    """
+    supabase = get_supabase_anon()
+    user_id = user.id if hasattr(user, "id") else user.get("id")
+
+    try:
+        report_response = supabase.table("generated_reports")\
+            .select("id,status,generated_at,file_path,observation_file_id")\
+            .eq("id", str(report_id))\
+            .eq("user_id", user_id)\
+            .limit(1)\
+            .execute()
+        report_rows = report_response.data or []
+    except Exception as e:
+        print(f"Error fetching report detail: {e}")
+        report_rows = []
+
+    if not report_rows:
+        # Graceful fallback for stale/deleted report IDs from cached UI state.
+        try:
+            latest_response = (
+                supabase.table("generated_reports")
+                .select("id,status,generated_at,file_path,observation_file_id")
+                .eq("user_id", user_id)
+                .order("generated_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            report_rows = latest_response.data or []
+        except Exception as e:
+            print(f"Error fetching latest report fallback: {e}")
+            report_rows = []
+
+    if not report_rows:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    report = report_rows[0]
+    observation = None
+    maps = []
+    workflow_logs = []
+    observation_summary = {}
+    forecast_summary = {}
+    ai_narration = {}
+    observation_bytes = None
+
+    observation_file_id = report.get("observation_file_id")
+    if observation_file_id:
+        try:
+            obs_response = supabase.table("uploads")\
+                .select("id,file_name,file_path,status,report_week,report_year,report_start_at,report_end_at")\
+                .eq("id", str(observation_file_id))\
+                .limit(1)\
+                .execute()
+            obs_rows = obs_response.data or []
+            if obs_rows:
+                observation = obs_rows[0]
+
+                file_path = observation.get("file_path")
+                if file_path:
+                    file_bytes = supabase.storage.from_(settings.SUPABASE_STORAGE_BUCKET).download(file_path)
+                    observation_bytes = file_bytes
+                    observation_summary = summarize_observation_data(
+                        csv_bytes=file_bytes,
+                        requested_variables=["rainfall", "tmin", "tmax", "wind"],
+                    )
+        except Exception as e:
+            print(f"Error fetching observation detail: {e}")
+
+    if observation and observation.get("report_week") and observation.get("report_year"):
+        try:
+            maps_response = supabase.table("generated_maps")\
+                .select("variable,map_url,created_at")\
+                .eq("user_id", user_id)\
+                .eq("report_week", observation["report_week"])\
+                .eq("report_year", observation["report_year"])\
+                .order("created_at", desc=True)\
+                .execute()
+            maps = maps_response.data or []
+        except Exception as e:
+            print(f"Error fetching report maps detail: {e}")
+
+    # Resolve county for centroid fallback and narration context.
+    county_name = "County"
+    try:
+        profile_response = (
+            supabase.table("profiles")
+            .select("county")
+            .eq("id", user_id)
+            .limit(1)
+            .execute()
+        )
+        rows = profile_response.data or []
+        if rows and rows[0].get("county"):
+            county_name = str(rows[0]["county"])
+    except Exception:
+        pass
+
+    # Open-Meteo forecast summary fallback for missing observation variables.
+    try:
+        # 1) Determine forecast period; fallback to generated_at-derived weekly window.
+        period_start = observation.get("report_start_at") if observation else None
+        period_end = observation.get("report_end_at") if observation else None
+        if not period_start or not period_end:
+            generated_at = report.get("generated_at")
+            if generated_at:
+                gen_dt = (
+                    datetime.fromisoformat(str(generated_at).replace("Z", "+00:00"))
+                    if isinstance(generated_at, str)
+                    else generated_at
+                )
+            else:
+                gen_dt = datetime.utcnow()
+            period_start = (gen_dt + timedelta(days=1)).date().isoformat()
+            period_end = (gen_dt + timedelta(days=7)).date().isoformat()
+
+        # 2) Determine centroid from station CSV; fallback to Kenya centroid.
+        centroid = _extract_centroid_from_observation_csv(observation_bytes) if observation_bytes else None
+        if not centroid:
+            # Conservative fallback so forecast-derived stats still compute.
+            centroid = {"lat": -0.0236, "lon": 37.9062}
+
+        daily = fetch_daily_forecast(
+            latitude=centroid["lat"],
+            longitude=centroid["lon"],
+            report_start_at=str(period_start),
+            report_end_at=str(period_end),
+        )
+
+        tmax = pd.to_numeric(pd.Series(daily.get("temperature_2m_max", [])), errors="coerce").dropna()
+        tmin = pd.to_numeric(pd.Series(daily.get("temperature_2m_min", [])), errors="coerce").dropna()
+        wind = pd.to_numeric(pd.Series(daily.get("wind_speed_10m_max", [])), errors="coerce").dropna()
+        gust = pd.to_numeric(pd.Series(daily.get("wind_gusts_10m_max", [])), errors="coerce").dropna()
+        rain = pd.to_numeric(pd.Series(daily.get("precipitation_sum", [])), errors="coerce").dropna()
+
+        mean_temp = None
+        if not tmax.empty and not tmin.empty:
+            mean_temp = round(float(((tmax + tmin) / 2.0).mean()), 2)
+        elif not tmax.empty:
+            mean_temp = round(float(tmax.mean()), 2)
+        elif not tmin.empty:
+            mean_temp = round(float(tmin.mean()), 2)
+
+        max_wind = None
+        if not wind.empty:
+            max_wind = round(float(wind.max()), 2)
+        elif not gust.empty:
+            max_wind = round(float(gust.max()), 2)
+
+        forecast_summary = {
+            "mean_temperature": mean_temp,
+            "max_wind_speed": max_wind,
+            "rainfall_sum": (round(float(rain.sum()), 2) if not rain.empty else None),
+        }
+    except Exception as e:
+        print(f"Error fetching Open-Meteo forecast summary: {e}")
+
+    # AI narration for dynamic county detail summary.
+    try:
+        wk = int(observation.get("report_week")) if observation and observation.get("report_week") is not None else 0
+        yr = int(observation.get("report_year")) if observation and observation.get("report_year") is not None else datetime.utcnow().year
+        report_start = observation.get("report_start_at") if observation else None
+        report_end = observation.get("report_end_at") if observation else None
+
+        if report_start and report_end:
+            map_context = [
+                {"variable": m.get("variable", ""), "map_url": m.get("map_url", "")}
+                for m in maps
+            ]
+            ai_narration = await generate_report_narration(
+                county_name=county_name,
+                week_number=wk,
+                year=yr,
+                report_start_at=str(report_start),
+                report_end_at=str(report_end),
+                selected_variables=["rainfall", "tmin", "tmax", "wind"],
+                observation_summary=observation_summary or {},
+                map_context=map_context,
+            )
+    except Exception as e:
+        print(f"Error generating AI narration for report detail: {e}")
+
+    try:
+        ws_response = supabase.table("workflow_status")\
+            .select("id")\
+            .eq("generated_report_id", str(report_id))\
+            .order("updated_at", desc=True)\
+            .limit(1)\
+            .execute()
+        ws_rows = ws_response.data or []
+        if ws_rows:
+            workflow_status_id = ws_rows[0]["id"]
+            logs_response = supabase.table("workflow_logs")\
+                .select("stage,status,message,created_at")\
+                .eq("workflow_status_id", workflow_status_id)\
+                .order("created_at", desc=True)\
+                .limit(20)\
+                .execute()
+            workflow_logs = logs_response.data or []
+    except Exception as e:
+        print(f"Error fetching report workflow detail: {e}")
+
+    return {
+        "report": {
+            "id": report.get("id"),
+            "status": report.get("status"),
+            "generated_at": report.get("generated_at"),
+            "file_path": report.get("file_path"),
+            "pdf_url": f"/api/v1/reports/download/{report.get('id')}",
+        },
+        "observation": observation,
+        "observation_summary": observation_summary,
+        "forecast_summary": forecast_summary,
+        "ai_narration": ai_narration,
+        "maps": maps,
+        "workflow_logs": workflow_logs,
+    }
+
+
+@router.get("/download/{report_id}")
+async def download_report(report_id: UUID, user=Depends(get_current_user)):
+    # Use anon client - respects RLS policies
+    supabase = get_supabase_anon()
+    
+    user_id = user.id if hasattr(user, "id") else user.get("id")
+
+    # Get report details and verify ownership in one query
+    try:
+        report_response = supabase.table("generated_reports")\
+            .select("file_path")\
+            .eq("id", str(report_id))\
+            .eq("user_id", user_id)\
+            .execute()
+        
+        rows = report_response.data or []
+    except Exception as e:
+        print(f"Error fetching report: {e}")
+        rows = []
+
+    if not rows:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    file_path = rows[0].get("file_path")
+    if not file_path:
+        raise HTTPException(status_code=404, detail="File path missing")
+
+    # Download file from Supabase Storage using anon client
+    # RLS policies should allow users to read their own files
+    try:
+        # Extract bucket and path
+        # Assuming file_path format: "bucket_name/path/to/file.pdf"
+        path_parts = file_path.split("/", 1)
+        if len(path_parts) == 2:
+            bucket_name = path_parts[0]
+            object_path = path_parts[1]
+        else:
+            # Use default bucket if not specified
+            bucket_name = settings.SUPABASE_STORAGE_BUCKET
+            object_path = file_path
+
+        # Download file from storage using anon client
+        # This will only work if:
+        # 1. The bucket has proper RLS policies
+        # 2. The user has access to this specific file
+        file_data = supabase.storage.from_(bucket_name).download(object_path)
+        
+        if not file_data:
+            raise HTTPException(status_code=404, detail="File not found in storage")
+        
+        filename = object_path.split("/")[-1]
+        
+        return StreamingResponse(
+            io.BytesIO(file_data), 
+            media_type="application/pdf", 
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"'
+            }
+        )
+    except Exception as e:
+        print(f"Error downloading file: {e}")
+        raise HTTPException(status_code=500, detail=f"File download failed: {str(e)}")

@@ -13,7 +13,6 @@ class HealthResponse(BaseModel):
     status: str = Field(..., description="Service status")
     version: str = Field(..., description="API version")
     database: str = Field(..., description="Database connection status")
-    pdf_generator: Optional[str] = Field(None, description="PDF generator availability")
 
 
 class ErrorResponse(BaseModel):

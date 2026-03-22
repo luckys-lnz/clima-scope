@@ -5,8 +5,9 @@ Main application setup and configuration.
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
-from .config import settings
+from app.core.config import settings
 from .utils.logging import get_logger
 
 # Get logger
@@ -31,13 +32,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include API routers - ADD 'auth' to imports
-from .api.v1 import health, auth, upload
+# Include API routers
+from .api.v1 import health, auth, uploads, setting, report, dashboard, workflow
 
 app.include_router(health.router, prefix=f"{settings.API_V1_PREFIX}/health", tags=["health"])
 app.include_router(auth.router, prefix=f"{settings.API_V1_PREFIX}/auth", tags=["authentication"])
-app.include_router(upload.router, prefix=f"{settings.API_V1_PREFIX}/upload", tags=["upload"])
-
+app.include_router(uploads.router, prefix=f"{settings.API_V1_PREFIX}/uploads", tags=["uploads"])
+app.include_router(setting.router, prefix=f"{settings.API_V1_PREFIX}/setting", tags=["setting"])
+app.include_router(report.router, prefix=f"{settings.API_V1_PREFIX}/reports", tags=["reports"])
+app.include_router(dashboard.router, prefix=f"{settings.API_V1_PREFIX}/dashboard", tags=["dashboard"])
+app.include_router(workflow.router, prefix=f"{settings.API_V1_PREFIX}/workflow", tags=["workflow"])
 
 @app.on_event("startup")
 async def startup_event():

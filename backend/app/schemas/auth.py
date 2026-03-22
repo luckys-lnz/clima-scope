@@ -26,6 +26,9 @@ class LoginRequest(BaseModel):
     email: EmailStr
     password: str
 
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
 class UserResponse(BaseModel):
     id: str
     email: str
@@ -33,16 +36,25 @@ class UserResponse(BaseModel):
     organization: str
     county: Optional[str]
     phone: Optional[str]
+    job_title: Optional[str] = None
+    station_name: Optional[str] = None
+    station_address: Optional[str] = None
+    signoff_email: Optional[str] = None
+    secondary_email: Optional[str] = None
     
 class AuthResponse(BaseModel):
     success: bool
     access_token: str
     refresh_token: str
     user: UserResponse
-    expires_in: int = 3600
 
 class ProfileUpdateRequest(BaseModel):
     full_name: Optional[str] = None
     organization: Optional[str] = None
     county: Optional[str] = None
     phone: Optional[str] = None
+    job_title: Optional[str] = None
+    station_name: Optional[str] = None
+    station_address: Optional[str] = None
+    signoff_email: Optional[str] = None
+    secondary_email: Optional[str] = None

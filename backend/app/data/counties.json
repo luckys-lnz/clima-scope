@@ -1,238 +1,425 @@
 {
-    "BARINGO": {
-      "constituencies": 6,
-      "wards": 30,
-      "code": "01"
-    },
-    "BOMET": {
-      "constituencies": 5,
-      "wards": 25,
-      "code": "02"
-    },
-    "BUNGOMA": {
-      "constituencies": 9,
-      "wards": 45,
-      "code": "03"
-    },
-    "BUSIA": {
-      "constituencies": 7,
-      "wards": 35,
-      "code": "04"
-    },
-    "ELGEYO MARAKWET": {
-      "constituencies": 4,
-      "wards": 20,
-      "code": "05"
-    },
-    "EMBU": {
-      "constituencies": 4,
-      "wards": 20,
-      "code": "06"
-    },
-    "GARISSA": {
-      "constituencies": 6,
-      "wards": 30,
-      "code": "07"
-    },
-    "HOMA BAY": {
-      "constituencies": 8,
-      "wards": 40,
-      "code": "08"
-    },
-    "ISIOLO": {
-      "constituencies": 2,
-      "wards": 10,
-      "code": "09"
-    },
-    "KAJIADO": {
-      "constituencies": 5,
-      "wards": 25,
-      "code": "10"
-    },
-    "KAKAMEGA": {
-      "constituencies": 12,
-      "wards": 60,
-      "code": "11"
-    },
-    "KERICHO": {
-      "constituencies": 6,
-      "wards": 30,
-      "code": "12"
-    },
-    "KIAMBU": {
-      "constituencies": 12,
-      "wards": 60,
-      "code": "13"
-    },
-    "KILIFI": {
-      "constituencies": 7,
-      "wards": 35,
-      "code": "14"
-    },
-    "KIRINYAGA": {
-      "constituencies": 4,
-      "wards": 20,
-      "code": "15"
-    },
-    "KISII": {
-      "constituencies": 9,
-      "wards": 45,
-      "code": "16"
-    },
-    "KISUMU": {
-      "constituencies": 7,
-      "wards": 35,
-      "code": "17"
-    },
-    "KITUI": {
-      "constituencies": 8,
-      "wards": 40,
-      "code": "18"
-    },
-    "KWALE": {
-      "constituencies": 4,
-      "wards": 20,
-      "code": "19"
-    },
-    "LAIKIPIA": {
-      "constituencies": 3,
-      "wards": 15,
-      "code": "20"
-    },
-    "LAMU": {
-      "constituencies": 2,
-      "wards": 10,
-      "code": "21"
-    },
-    "MACHAKOS": {
-      "constituencies": 8,
-      "wards": 40,
-      "code": "22"
-    },
-    "MAKUENI": {
-      "constituencies": 6,
-      "wards": 30,
-      "code": "23"
-    },
-    "MANDERA": {
-      "constituencies": 6,
-      "wards": 30,
-      "code": "24"
-    },
-    "MARSABIT": {
-      "constituencies": 4,
-      "wards": 20,
-      "code": "25"
-    },
-    "MERU": {
-      "constituencies": 9,
-      "wards": 45,
-      "code": "26"
-    },
-    "MIGORI": {
-      "constituencies": 8,
-      "wards": 40,
-      "code": "27"
-    },
-    "MOMBASA": {
-      "constituencies": 6,
-      "wards": 30,
-      "code": "28"
-    },
-    "MURANGA": {
-      "constituencies": 7,
-      "wards": 35,
-      "code": "29"
-    },
-    "NAIROBI": {
-      "constituencies": 17,
-      "wards": 85,
-      "code": "30"
-    },
-    "NAKURU": {
-      "constituencies": 11,
-      "wards": 55,
-      "code": "31"
-    },
-    "NANDI": {
-      "constituencies": 6,
-      "wards": 30,
-      "code": "32"
-    },
-    "NAROK": {
-      "constituencies": 6,
-      "wards": 30,
-      "code": "33"
-    },
-    "NYAMIRA": {
-      "constituencies": 4,
-      "wards": 20,
-      "code": "34"
-    },
-    "NYANDARUA": {
-      "constituencies": 5,
-      "wards": 25,
-      "code": "35"
-    },
-    "NYERI": {
-      "constituencies": 6,
-      "wards": 30,
-      "code": "36"
-    },
-    "SAMBURU": {
-      "constituencies": 3,
-      "wards": 15,
-      "code": "37"
-    },
-    "SIAYA": {
-      "constituencies": 6,
-      "wards": 30,
-      "code": "38"
-    },
-    "TAITA TAVETA": {
-      "constituencies": 4,
-      "wards": 20,
-      "code": "39"
-    },
-    "TANA RIVER": {
-      "constituencies": 3,
-      "wards": 15,
-      "code": "40"
-    },
-    "THARAKA NITHI": {
-      "constituencies": 3,
-      "wards": 15,
-      "code": "41"
-    },
-    "TRANS NZOIA": {
-      "constituencies": 5,
-      "wards": 25,
-      "code": "42"
-    },
-    "TURKANA": {
-      "constituencies": 6,
-      "wards": 30,
-      "code": "43"
-    },
-    "UASIN GISHU": {
-      "constituencies": 6,
-      "wards": 30,
-      "code": "44"
-    },
-    "VIHIGA": {
-      "constituencies": 5,
-      "wards": 25,
-      "code": "45"
-    },
-    "WAJIR": {
-      "constituencies": 6,
-      "wards": 30,
-      "code": "46"
-    },
-    "WEST POKOT": {
-      "constituencies": 4,
-      "wards": 20,
-      "code": "47"
+  "MOMBASA": {
+     "constituencies": 6,
+    "wards": 30,
+    "code": "001",
+    "centroid": {
+      "lat": -3.993507,
+      "lon": 39.700479
+    }
+  },
+  "KWALE": {
+    "constituencies": 4,
+    "wards": 20,
+    "code": "002",
+    "centroid": {
+      "lat": -4.123774,
+      "lon": 39.05678
+    }
+  },
+  "KILIFI": {
+    "constituencies": 7,
+    "wards": 35,
+    "code": "003",
+    "centroid": {
+      "lat": -3.151238,
+      "lon": 39.67551
+    }
+  },
+  "TANA RIVER": {
+    "constituencies": 3,
+    "wards": 15,
+    "code": "004",
+    "centroid": {
+      "lat": -1.537041,
+      "lon": 39.551945
+    }
+  },
+  "LAMU": {
+    "constituencies": 2,
+    "wards": 10,
+    "code": "005",
+    "centroid": {
+      "lat": -2.071944,
+      "lon": 40.603505
+    }
+  },
+  "TAITA TAVETA": {
+    "constituencies": 4,
+    "wards": 20,
+    "code": "006",
+    "centroid": {
+      "lat": -3.39613,
+      "lon": 38.379838
+    }
+  },
+  "GARISSA": {
+    "constituencies": 6,
+    "wards": 30,
+    "code": "007",
+    "centroid": {
+      "lat": -0.529876,
+      "lon": 40.357122
+    }
+  },
+  "WAJIR": {
+    "constituencies": 6,
+    "wards": 30,
+    "code": "008",
+    "centroid": {
+      "lat": 1.935574,
+      "lon": 40.020369
+    }
+  },
+  "MANDERA": {
+    "constituencies": 6,
+    "wards": 30,
+    "code": "009",
+    "centroid": {
+      "lat": 3.22477,
+      "lon": 40.325218
+    }
+  },
+  "MARSABIT": {
+    "constituencies": 4,
+    "wards": 20,
+    "code": "010",
+    "centroid": {
+      "lat": 2.868486,
+      "lon": 37.701771
+    }
+  },
+  "ISIOLO": {
+    "constituencies": 2,
+    "wards": 10,
+    "code": "011",
+    "centroid": {
+      "lat": 1.024817,
+      "lon": 38.74214
+    }
+  },
+  "MERU": {
+    "constituencies": 9,
+    "wards": 45,
+    "code": "012",
+    "centroid": {
+      "lat": 0.229123,
+      "lon": 37.77937
+    }
+  },
+  "THARAKA NITHI": {
+    "constituencies": 3,
+    "wards": 15,
+    "code": "013",
+    "centroid": {
+      "lat": -0.192982,
+      "lon": 37.964013
+    }
+  },
+  "EMBU": {
+    "constituencies": 4,
+    "wards": 20,
+    "code": "014",
+    "centroid": {
+      "lat": -0.534659,
+      "lon": 37.665555
+    }
+  },
+  "KITUI": {
+    "constituencies": 8,
+    "wards": 40,
+    "code": "015",
+    "centroid": {
+      "lat": -1.555872,
+      "lon": 38.367203
+    }
+  },
+  "MACHAKOS": {
+    "constituencies": 8,
+    "wards": 40,
+    "code": "016",
+    "centroid": {
+      "lat": -1.270888,
+      "lon": 37.400518
+    }
+  },
+  "MAKUENI": {
+    "constituencies": 6,
+    "wards": 30,
+    "code": "017",
+    "centroid": {
+      "lat": -2.245432,
+      "lon": 37.875457
+    }
+  },
+  "NYANDARUA": {
+    "constituencies": 5,
+    "wards": 25,
+    "code": "018",
+    "centroid": {
+      "lat": -0.394291,
+      "lon": 36.496864
+    }
+  },
+  "NYERI": {
+    "constituencies": 6,
+    "wards": 30,
+    "code": "019",
+    "centroid": {
+      "lat": -0.327236,
+      "lon": 36.927322
+    }
+  },
+  "KIRINYAGA": {
+    "constituencies": 4,
+    "wards": 20,
+    "code": "020",
+    "centroid": {
+      "lat": -0.468981,
+      "lon": 37.302669
+    }
+  },
+  "MURANG'A": {
+    "constituencies": 7,
+    "wards": 35,
+    "code": "021",
+    "centroid": {
+      "lat": -0.828992,
+      "lon": 37.004265
+    }
+  },
+  "KIAMBU": {
+    "constituencies": 12,
+    "wards": 60,
+    "code": "022",
+    "centroid": {
+      "lat": -1.039314,
+      "lon": 36.851903
+    }
+  },
+  "TURKANA": {
+    "constituencies": 6,
+    "wards": 30,
+    "code": "023",
+    "centroid": {
+      "lat": 3.159467,
+      "lon": 35.313067
+    }
+  },
+  "WEST POKOT": {
+    "constituencies": 4,
+    "wards": 20,
+    "code": "024",
+    "centroid": {
+      "lat": 1.896586,
+      "lon": 35.20131
+    }
+  },
+  "SAMBURU": {
+    "constituencies": 3,
+    "wards": 15,
+    "code": "025",
+    "centroid": {
+      "lat": 1.538933,
+      "lon": 36.941159
+    }
+  },
+  "TRANS NZOIA": {
+    "constituencies": 5,
+    "wards": 25,
+    "code": "026",
+    "centroid": {
+      "lat": 1.042602,
+      "lon": 34.983867
+    }
+  },
+  "UASIN GISHU": {
+    "constituencies": 6,
+    "wards": 30,
+    "code": "027",
+    "centroid": {
+      "lat": 0.476592,
+      "lon": 35.305782
+    }
+  },
+  "ELGEYO MARAKWET": {
+    "constituencies": 4,
+    "wards": 20,
+    "code": "028",
+    "centroid": {
+      "lat": 0.741345,
+      "lon": 35.561079
+    }
+  },
+  "NANDI": {
+    "constituencies": 6,
+    "wards": 30,
+    "code": "029",
+    "centroid": {
+      "lat": 0.223742,
+      "lon": 35.128121
+    }
+  },
+  "BARINGO": {
+    "constituencies": 6,
+    "wards": 30,
+    "code": "030",
+    "centroid": {
+      "lat": 0.724605,
+      "lon": 36.019047
+    }
+  },
+  "LAIKIPIA": {
+    "constituencies": 3,
+    "wards": 15,
+    "code": "031",
+    "centroid": {
+      "lat": 0.287512,
+      "lon": 36.824718
+    }
+  },
+  "NAKURU": {
+    "constituencies": 11,
+    "wards": 55,
+    "code": "032",
+    "centroid": {
+      "lat": -0.462869,
+      "lon": 36.102412
+    }
+  },
+  "NAROK": {
+    "constituencies": 6,
+    "wards": 30,
+    "code": "033",
+    "centroid": {
+      "lat": -1.291247,
+      "lon": 35.471964
+    }
+  },
+  "KAJIADO": {
+    "constituencies": 5,
+    "wards": 25,
+    "code": "034",
+    "centroid": {
+      "lat": -2.128358,
+      "lon": 36.807142
+    }
+  },
+  "KERICHO": {
+    "constituencies": 6,
+    "wards": 30,
+    "code": "035",
+    "centroid": {
+      "lat": -0.317244,
+      "lon": 35.226503
+    }
+  },
+  "BOMET": {
+    "constituencies": 5,
+    "wards": 25,
+    "code": "036",
+    "centroid": {
+      "lat": -0.72383,
+      "lon": 35.2452
+    }
+  },
+  "KAKAMEGA": {
+    "constituencies": 12,
+    "wards": 60,
+    "code": "037",
+    "centroid": {
+      "lat": 0.495778,
+      "lon": 34.803389
+    }
+  },
+  "VIHIGA": {
+    "constituencies": 5,
+    "wards": 25,
+    "code": "038",
+    "centroid": {
+      "lat": 0.082424,
+      "lon": 34.70947
+    }
+  },
+  "BUNGOMA": {
+    "constituencies": 9,
+    "wards": 45,
+    "code": "039",
+    "centroid": {
+      "lat": 0.784194,
+      "lon": 34.720806
+    }
+  },
+  "BUSIA": {
+    "constituencies": 7,
+    "wards": 35,
+    "code": "040",
+    "centroid": {
+      "lat": 0.375698,
+      "lon": 34.264815
+    }
+  },
+  "SIAYA": {
+    "constituencies": 6,
+    "wards": 30,
+    "code": "041",
+    "centroid": {
+      "lat": -0.046418,
+      "lon": 34.253967
+    }
+  },
+  "KISUMU": {
+    "constituencies": 7,
+    "wards": 35,
+    "code": "042",
+    "centroid": {
+      "lat": -0.196447,
+      "lon": 34.951286
+    }
+  },
+  "HOMA BAY": {
+    "constituencies": 8,
+    "wards": 40,
+    "code": "043",
+    "centroid": {
+      "lat": -0.581887,
+      "lon": 34.388312
+    }
+  },
+  "MIGORI": {
+    "constituencies": 8,
+    "wards": 40,
+    "code": "044",
+    "centroid": {
+      "lat": -1.020409,
+      "lon": 34.307711
+    }
+  },
+  "KISII": {
+    "constituencies": 9,
+    "wards": 45,
+    "code": "045",
+    "centroid": {
+      "lat": -0.742245,
+      "lon": 34.756353
+    }
+  },
+  "NYAMIRA": {
+    "constituencies": 4,
+    "wards": 20,
+    "code": "046",
+    "centroid": {
+      "lat": -0.652667,
+      "lon": 34.932473
+    }
+  },
+  "NAIROBI": {
+    "constituencies": 17,
+    "wards": 85,
+    "code": "047",
+    "centroid": {
+      "lat": -1.309499,
+      "lon": 36.82526
     }
   }
-  
+}
