@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { Cloud, AlertCircle, CheckCircle } from "lucide-react"
+import { Cloud, AlertCircle } from "lucide-react"
 import { authService } from "@/lib/services/authService"
 import type { LoginData } from "@/lib/models/auth"
 
@@ -11,7 +11,6 @@ export default function SignIn() {
   const router = useRouter()
   const [formData, setFormData] = useState<LoginData>({ email: "", password: "" })
   const [error, setError] = useState("")
-  const [success, setSuccess] = useState("")
   const [isLoading, setIsLoading] = useState(false)
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -23,7 +22,6 @@ export default function SignIn() {
     e.preventDefault()
     setIsLoading(true)
     setError("")
-    setSuccess("")
 
     try {
       // Validate form
@@ -34,7 +32,6 @@ export default function SignIn() {
       // Call login via AuthService
       await authService.login(formData)
 
-      setSuccess("Login successful! Redirecting...")
       setFormData({ email: "", password: "" })
       router.push("/dashboard")
     } catch (err: any) {
@@ -72,13 +69,6 @@ export default function SignIn() {
             <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 flex gap-3 items-start">
               <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
               <p className="text-sm text-red-500">{error}</p>
-            </div>
-          )}
-
-          {success && (
-            <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/20 flex gap-3 items-start">
-              <CheckCircle className="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" />
-              <p className="text-sm text-green-500">{success}</p>
             </div>
           )}
 

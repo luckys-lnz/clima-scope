@@ -7,8 +7,10 @@ VALID_BORDER_STYLES = {"solid", "dashed", "dotted"}
 class MapSettings(TypedDict):
     show_constituencies: bool
     show_wards: bool
-    show_labels: bool
-    label_font_size: int
+    show_constituency_labels: bool
+    show_ward_labels: bool
+    constituency_label_font_size: int
+    ward_label_font_size: int
     constituency_border_color: str
     constituency_border_width: float
     constituency_border_style: str
@@ -20,8 +22,10 @@ class MapSettings(TypedDict):
 DEFAULT_MAP_SETTINGS: MapSettings = {
     "show_constituencies": True,
     "show_wards": True,
-    "show_labels": True,
-    "label_font_size": 12,
+    "show_constituency_labels": True,
+    "show_ward_labels": True,
+    "constituency_label_font_size": 12,
+    "ward_label_font_size": 12,
     "constituency_border_color": "#1e293b",
     "constituency_border_width": 1.2,
     "constituency_border_style": "solid",
@@ -84,8 +88,22 @@ def sanitize_map_settings(payload: Optional[Mapping[str, Any]]) -> MapSettings:
             row.get("show_constituencies"), DEFAULT_MAP_SETTINGS["show_constituencies"]
         ),
         "show_wards": _coerce_bool(row.get("show_wards"), DEFAULT_MAP_SETTINGS["show_wards"]),
-        "show_labels": _coerce_bool(row.get("show_labels"), DEFAULT_MAP_SETTINGS["show_labels"]),
-        "label_font_size": _coerce_int(row.get("label_font_size"), DEFAULT_MAP_SETTINGS["label_font_size"]),
+        "show_constituency_labels": _coerce_bool(
+            row.get("show_constituency_labels"),
+            DEFAULT_MAP_SETTINGS["show_constituency_labels"],
+        ),
+        "show_ward_labels": _coerce_bool(
+            row.get("show_ward_labels"),
+            DEFAULT_MAP_SETTINGS["show_ward_labels"],
+        ),
+        "constituency_label_font_size": _coerce_int(
+            row.get("constituency_label_font_size"),
+            DEFAULT_MAP_SETTINGS["constituency_label_font_size"],
+        ),
+        "ward_label_font_size": _coerce_int(
+            row.get("ward_label_font_size"),
+            DEFAULT_MAP_SETTINGS["ward_label_font_size"],
+        ),
         "constituency_border_color": _coerce_string(
             row.get("constituency_border_color"), DEFAULT_MAP_SETTINGS["constituency_border_color"]
         ),

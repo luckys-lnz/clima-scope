@@ -128,6 +128,8 @@ async def login(user_data: LoginRequest):
                 email=auth_resp.user.email,
                 full_name=profile.get("full_name", ""),
                 organization=profile.get("organization", ""),
+                prefix=profile.get("prefix"),
+                title=profile.get("prefix"),
                 county=profile.get("county"),
                 phone=profile.get("phone"),
                 job_title=profile.get("job_title"),
@@ -173,6 +175,8 @@ async def get_current_user_profile(user=Depends(get_current_user)):
         email=user.email,
         full_name=profile.get("full_name", ""),
         organization=profile.get("organization", ""),
+        prefix=profile.get("prefix"),
+        title=profile.get("prefix"),
         county=profile.get("county"),
         phone=profile.get("phone"),
         job_title=profile.get("job_title"),
@@ -190,7 +194,10 @@ async def update_profile(updates: ProfileUpdateRequest, user=Depends(get_current
     supabase = get_supabase_anon()
     
     update_data = updates.model_dump(exclude_unset=True, exclude_none=True)
-    
+    # Accept both title and prefix from the client, but store under prefix.
+    if "title" in update_data:
+        update_data["prefix"] = update_data.pop("title")
+
     if update_data:
         try:
             supabase.table("profiles")\
@@ -215,6 +222,8 @@ async def update_profile(updates: ProfileUpdateRequest, user=Depends(get_current
         email=user.email,
         full_name=profile.get("full_name", ""),
         organization=profile.get("organization", ""),
+        prefix=profile.get("prefix"),
+        title=profile.get("prefix"),
         county=profile.get("county"),
         phone=profile.get("phone"),
         job_title=profile.get("job_title"),
