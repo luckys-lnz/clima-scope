@@ -5,6 +5,7 @@ import { Cloud, TrendingUp, BarChart3, MapPin, Lock, Zap } from "lucide-react"
 import { PricingSection } from "@/components/marketing/pricing-section"
 
 
+
 export default function Home() {
   return (
     <div className="min-h-screen bg-background text-foreground">
