@@ -26,8 +26,6 @@ export const bootstrapService = {
           selectedTemplateId: data.user_settings?.pdf_template_id || null,
           showConstituencies: data.user_settings?.show_constituencies ?? true,
           showWards: data.user_settings?.show_wards ?? true,
-          showLabels: data.user_settings?.show_labels ?? true,
-          labelFontSize: data.user_settings?.label_font_size ?? 12,
           constituencyBorderColor: data.user_settings?.constituency_border_color || "#1e293b",
           constituencyBorderWidth: data.user_settings?.constituency_border_width ?? 1.2,
           constituencyBorderStyle: data.user_settings?.constituency_border_style || "solid",

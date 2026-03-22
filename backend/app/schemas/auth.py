@@ -36,6 +36,8 @@ class UserResponse(BaseModel):
     organization: str
     county: Optional[str]
     phone: Optional[str]
+    prefix: Optional[str] = None
+    title: Optional[str] = None
     job_title: Optional[str] = None
     station_name: Optional[str] = None
     station_address: Optional[str] = None
@@ -49,6 +51,8 @@ class AuthResponse(BaseModel):
     user: UserResponse
 
 class ProfileUpdateRequest(BaseModel):
+    prefix: Optional[str] = None
+    title: Optional[str] = None
     full_name: Optional[str] = None
     organization: Optional[str] = None
     county: Optional[str] = None

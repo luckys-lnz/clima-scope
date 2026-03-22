@@ -285,6 +285,14 @@ export default function Dashboard() {
                   {/* Dropdown */}
                   {userMenuOpen && (
                     <div className="absolute right-0 top-12 w-36 bg-card border border-border rounded-lg shadow-lg z-50">
+                      <Link
+                        href="/profile"
+                        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-muted/70 rounded-lg"
+                        onClick={() => setUserMenuOpen(false)}
+                      >
+                        <Settings className="w-4 h-4" />
+                        Profile
+                      </Link>
                       <button
                         onClick={handleLogout}
                         disabled={isLoggingOut}

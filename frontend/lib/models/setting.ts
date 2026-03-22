@@ -11,8 +11,10 @@ export interface UserSettings {
     selected_template?: SharedFile | null
     show_constituencies: boolean
     show_wards: boolean
-    show_labels: boolean
-    label_font_size: number
+    show_constituency_labels: boolean
+    show_ward_labels: boolean
+    constituency_label_font_size: number
+    ward_label_font_size: number
     constituency_border_color: string
     constituency_border_width: number
     constituency_border_style: string
@@ -32,8 +34,10 @@ export interface UpdateSettingsPayload {
     pdf_template_id?: string | null
     show_constituencies?: boolean
     show_wards?: boolean
-    show_labels?: boolean
-    label_font_size?: number
+    show_constituency_labels?: boolean
+    show_ward_labels?: boolean
+    constituency_label_font_size?: number
+    ward_label_font_size?: number
     constituency_border_color?: string
     constituency_border_width?: number
     constituency_border_style?: string
@@ -46,6 +50,7 @@ export interface MapPreviewLabel {
     name: string
     lon: number
     lat: number
+    type?: "ward" | "constituency" | string
 }
 
 export interface MapPreviewGeometry {

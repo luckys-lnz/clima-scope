@@ -1,148 +1,163 @@
-"use client"
+"use client";
 
-import { ChevronLeft, AlertCircle } from "lucide-react"
-import { TextInput } from "@/components/text-input"
-import { SelectInput } from "@/components/select-input"
-import { useState, useEffect } from "react"
-import { SettingsService } from "@/lib/services/settingService"
-import { useAuth } from "@/hooks/useAuth"
-import type { MapPreviewResponse, MapPreviewGeometry } from "@/lib/models/setting"
+import { ChevronLeft, AlertCircle } from "lucide-react";
+import { TextInput } from "@/components/text-input";
+import { SelectInput } from "@/components/select-input";
+import { useState, useEffect } from "react";
+import { SettingsService } from "@/lib/services/settingService";
+import { useAuth } from "@/hooks/useAuth";
+import type {
+  MapPreviewResponse,
+  MapPreviewGeometry,
+} from "@/lib/models/setting";
 
 interface Template {
-  id: string
-  file_name: string
-  file_type: string
-  upload_date: string
-  file_path?: string | null
-  is_default?: boolean
+  id: string;
+  file_name: string;
+  file_type: string;
+  upload_date: string;
+  file_path?: string | null;
+  is_default?: boolean;
 }
 
 interface SystemConfigurationProps {
-  onBack: () => void
+  onBack: () => void;
 }
 
-const STORAGE_KEY = "system_settings_cache"
-const STORAGE_VERSION = 4
+const STORAGE_KEY = "system_settings_cache";
+const STORAGE_VERSION = 6; // increased because we added separate font sizes
 
-const DEFAULT_CONSTITUENCY_BORDER_COLOR = "#1e293b"
-const DEFAULT_CONSTITUENCY_BORDER_WIDTH = 1.2
-const DEFAULT_CONSTITUENCY_BORDER_STYLE = "solid"
-const DEFAULT_WARD_BORDER_COLOR = "#2563eb"
-const DEFAULT_WARD_BORDER_WIDTH = 0.9
-const DEFAULT_WARD_BORDER_STYLE = "dashed"
+const DEFAULT_CONSTITUENCY_BORDER_COLOR = "#1e293b";
+const DEFAULT_CONSTITUENCY_BORDER_WIDTH = 1.2;
+const DEFAULT_CONSTITUENCY_BORDER_STYLE = "solid";
+const DEFAULT_WARD_BORDER_COLOR = "#2563eb";
+const DEFAULT_WARD_BORDER_WIDTH = 0.9;
+const DEFAULT_WARD_BORDER_STYLE = "dashed";
 
 const BORDER_STYLE_OPTIONS = [
   { value: "solid", label: "Solid" },
   { value: "dashed", label: "Dashed" },
   { value: "dotted", label: "Dotted" },
-]
+];
 
 interface CachedSettings {
-  version: number
-  shapefilePath: string
-  templates: Template[]
-  selectedTemplateId: string | null
-  showConstituencies: boolean
-  showWards: boolean
-  showLabels: boolean
-  labelFontSize: number
-  constituencyBorderColor: string
-  constituencyBorderWidth: number
-  constituencyBorderStyle: string
-  wardBorderColor: string
-  wardBorderWidth: number
-  wardBorderStyle: string
+  version: number;
+  shapefilePath: string;
+  templates: Template[];
+  selectedTemplateId: string | null;
+  showConstituencies: boolean;
+  showWards: boolean;
+  showConstituencyLabels: boolean;
+  showWardLabels: boolean;
+  constituencyLabelFontSize: number;
+  wardLabelFontSize: number;
+  constituencyBorderColor: string;
+  constituencyBorderWidth: number;
+  constituencyBorderStyle: string;
+  wardBorderColor: string;
+  wardBorderWidth: number;
+  wardBorderStyle: string;
 }
 
 function clampFontSize(value: number): number {
-  if (Number.isNaN(value)) return 12
-  return Math.max(6, Math.min(48, Math.round(value)))
+  if (Number.isNaN(value)) return 12;
+  return Math.max(6, Math.min(48, Math.round(value)));
 }
 
 function borderStyleToDasharray(style: string): string | undefined {
   switch (style) {
     case "dashed":
-      return "6 4"
+      return "6 4";
     case "dotted":
-      return "2 4"
+      return "2 4";
     default:
-      return undefined
+      return undefined;
   }
 }
 
-const PREVIEW_WIDTH = 820
-const PREVIEW_HEIGHT = 540
-const PREVIEW_PADDING = 14
+const PREVIEW_WIDTH = 820;
+const PREVIEW_HEIGHT = 540;
+const PREVIEW_PADDING = 14;
 
-type Projector = (point: [number, number]) => [number, number]
+type Projector = (point: [number, number]) => [number, number];
 
 function createProjector(bbox: [number, number, number, number]): Projector {
-  const [minX, minY, maxX, maxY] = bbox
-  const width = Math.max(maxX - minX, 1e-6)
-  const height = Math.max(maxY - minY, 1e-6)
+  const [minX, minY, maxX, maxY] = bbox;
+  const width = Math.max(maxX - minX, 1e-6);
+  const height = Math.max(maxY - minY, 1e-6);
   const scale = Math.min(
     (PREVIEW_WIDTH - PREVIEW_PADDING * 2) / width,
     (PREVIEW_HEIGHT - PREVIEW_PADDING * 2) / height
-  )
-  const offsetX = (PREVIEW_WIDTH - width * scale) / 2
-  const offsetY = (PREVIEW_HEIGHT - height * scale) / 2
+  );
+  const offsetX = (PREVIEW_WIDTH - width * scale) / 2;
+  const offsetY = (PREVIEW_HEIGHT - height * scale) / 2;
 
   return ([lon, lat]) => [
     (lon - minX) * scale + offsetX,
     (maxY - lat) * scale + offsetY,
-  ]
+  ];
 }
 
 function lineToPath(coords: [number, number][], project: Projector): string {
-  if (!coords || coords.length === 0) return ""
+  if (!coords || coords.length === 0) return "";
   return coords
     .map((point, index) => {
-      const [x, y] = project(point)
-      return `${index === 0 ? "M" : "L"}${x.toFixed(2)} ${y.toFixed(2)}`
+      const [x, y] = project(point);
+      return `${index === 0 ? "M" : "L"}${x.toFixed(2)} ${y.toFixed(2)}`;
     })
-    .join(" ")
+    .join(" ");
 }
 
-function polygonToPath(rings: [number, number][][], project: Projector): string {
-  if (!rings || rings.length === 0) return ""
+function polygonToPath(
+  rings: [number, number][][],
+  project: Projector
+): string {
+  if (!rings || rings.length === 0) return "";
   return rings
     .map((ring) => `${lineToPath(ring, project)} Z`)
     .filter(Boolean)
-    .join(" ")
+    .join(" ");
 }
 
-function geometryToPath(geometry: MapPreviewGeometry | null | undefined, project: Projector): string {
-  if (!geometry) return ""
+function geometryToPath(
+  geometry: MapPreviewGeometry | null | undefined,
+  project: Projector
+): string {
+  if (!geometry) return "";
   switch (geometry.type) {
     case "Polygon":
-      return polygonToPath(geometry.coordinates as [number, number][][], project)
+      return polygonToPath(geometry.coordinates as [number, number][][], project);
     case "MultiPolygon":
       return (geometry.coordinates as [number, number][][][])
         .map((polygon) => polygonToPath(polygon, project))
         .filter(Boolean)
-        .join(" ")
+        .join(" ");
     case "LineString":
-      return lineToPath(geometry.coordinates as [number, number][], project)
+      return lineToPath(geometry.coordinates as [number, number][], project);
     case "MultiLineString":
       return (geometry.coordinates as [number, number][][])
         .map((line) => lineToPath(line, project))
         .filter(Boolean)
-        .join(" ")
+        .join(" ");
     case "GeometryCollection":
-      return (geometry.geometries as MapPreviewGeometry[] | undefined)
-        ?.map((geom) => geometryToPath(geom, project))
-        .filter(Boolean)
-        .join(" ") || ""
+      return (
+        (geometry.geometries as MapPreviewGeometry[] | undefined)
+          ?.map((geom) => geometryToPath(geom, project))
+          .filter(Boolean)
+          .join(" ") || ""
+      );
     default:
-      return ""
+      return "";
   }
 }
 
 function MapSettingsPreview({
   showConstituencies,
   showWards,
-  showLabels,
-  labelFontSize,
+  showConstituencyLabels,
+  showWardLabels,
+  constituencyLabelFontSize,
+  wardLabelFontSize,
   constituencyBorderColor,
   constituencyBorderWidth,
   constituencyBorderStyle,
@@ -153,48 +168,74 @@ function MapSettingsPreview({
   previewLoading,
   previewError,
 }: {
-  showConstituencies: boolean
-  showWards: boolean
-  showLabels: boolean
-  labelFontSize: number
-  constituencyBorderColor: string
-  constituencyBorderWidth: number
-  constituencyBorderStyle: string
-  wardBorderColor: string
-  wardBorderWidth: number
-  wardBorderStyle: string
-  preview: MapPreviewResponse | null
-  previewLoading: boolean
-  previewError: string | null
+  showConstituencies: boolean;
+  showWards: boolean;
+  showConstituencyLabels: boolean;
+  showWardLabels: boolean;
+  constituencyLabelFontSize: number;
+  wardLabelFontSize: number;
+  constituencyBorderColor: string;
+  constituencyBorderWidth: number;
+  constituencyBorderStyle: string;
+  wardBorderColor: string;
+  wardBorderWidth: number;
+  wardBorderStyle: string;
+  preview: MapPreviewResponse | null;
+  previewLoading: boolean;
+  previewError: string | null;
 }) {
   const hasPreview = Boolean(
     preview?.county_geometry &&
       Array.isArray(preview?.bbox) &&
       preview?.bbox.length === 4
-  )
-  const projector = hasPreview ? createProjector(preview!.bbox) : null
-  const countyPath = hasPreview && projector ? geometryToPath(preview!.county_geometry, projector) : ""
+  );
+  const projector = hasPreview ? createProjector(preview!.bbox) : null;
+  const countyPath =
+    hasPreview && projector
+      ? geometryToPath(preview!.county_geometry, projector)
+      : "";
   const constituencyPath =
     hasPreview && projector && showConstituencies
       ? geometryToPath(preview!.constituency_boundaries || null, projector)
-      : ""
+      : "";
   const wardPath =
     hasPreview && projector && showWards
       ? geometryToPath(preview!.ward_boundaries || null, projector)
-      : ""
-  const safeFontSize = clampFontSize(labelFontSize)
-  const constituencyDasharray = borderStyleToDasharray(constituencyBorderStyle)
-  const wardDasharray = borderStyleToDasharray(wardBorderStyle)
-  const labels = hasPreview && showLabels ? preview?.labels || [] : []
+      : "";
+  const safeConstFontSize = clampFontSize(constituencyLabelFontSize);
+  const safeWardFontSize = clampFontSize(wardLabelFontSize);
+  const constituencyDasharray = borderStyleToDasharray(constituencyBorderStyle);
+  const wardDasharray = borderStyleToDasharray(wardBorderStyle);
+
+  // Label type fallback
+  const allLabels = hasPreview ? preview?.labels || [] : [];
+  const constituencyLabels = allLabels.filter((l) => {
+    if (l.type) return l.type === "constituency";
+    return !l.name.toLowerCase().includes("ward");
+  });
+  const wardLabels = allLabels.filter((l) => {
+    if (l.type) return l.type === "ward";
+    return l.name.toLowerCase().includes("ward");
+  });
+
+  if (allLabels.length > 0 && !allLabels.some((l) => l.type)) {
+    console.warn(
+      "MapPreviewLabel missing 'type' property. Using name-based guess. " +
+        "Please update the backend to include 'type' ('constituency'/'ward')."
+    );
+  }
+
   const previewTitle = preview?.county
     ? `Live Map Preview (${preview.county} County)`
-    : "Live Map Preview (no weather data)"
+    : "Live Map Preview (no weather data)";
 
   return (
     <div className="rounded-lg border border-border bg-muted/20 p-4">
       <div className="flex items-center justify-between mb-3">
         <p className="text-xs text-muted-foreground">{previewTitle}</p>
-        {previewLoading && <span className="text-xs text-muted-foreground">Loading...</span>}
+        {previewLoading && (
+          <span className="text-xs text-muted-foreground">Loading...</span>
+        )}
       </div>
       {previewError && (
         <p className="text-xs text-amber-600 mb-2">{previewError}</p>
@@ -203,7 +244,13 @@ function MapSettingsPreview({
         viewBox={`0 0 ${PREVIEW_WIDTH} ${PREVIEW_HEIGHT}`}
         className="w-full h-auto rounded-md bg-slate-50 border border-slate-200"
       >
-        <rect x="0" y="0" width={PREVIEW_WIDTH} height={PREVIEW_HEIGHT} fill="#f8fafc" />
+        <rect
+          x="0"
+          y="0"
+          width={PREVIEW_WIDTH}
+          height={PREVIEW_HEIGHT}
+          fill="#f8fafc"
+        />
 
         {hasPreview ? (
           <>
@@ -237,21 +284,54 @@ function MapSettingsPreview({
               />
             )}
 
-            {showLabels && labels.length > 0 && (
-              <g fill="#0f172a" textAnchor="middle" style={{ fontSize: `${safeFontSize}px` }}>
-                {labels.slice(0, 35).map((label, idx) => {
-                  if (!projector) return null
-                  const [x, y] = projector([label.lon, label.lat])
+            {showConstituencyLabels && constituencyLabels.length > 0 && (
+              <g
+                fill={constituencyBorderColor}
+                textAnchor="middle"
+                style={{ fontSize: `${safeConstFontSize}px` }}
+              >
+                {constituencyLabels.slice(0, 35).map((label, idx) => {
+                  if (!projector) return null;
+                  const [x, y] = projector([label.lon, label.lat]);
                   return (
-                    <text key={`${label.name}-${idx}`} x={x} y={y} dominantBaseline="middle">
+                    <text
+                      key={`const-${label.name}-${idx}`}
+                      x={x}
+                      y={y}
+                      dominantBaseline="middle"
+                    >
                       {label.name}
                     </text>
-                  )
+                  );
+                })}
+              </g>
+            )}
+
+            {showWardLabels && wardLabels.length > 0 && (
+              <g
+                fill={wardBorderColor}
+                textAnchor="middle"
+                style={{ fontSize: `${safeWardFontSize}px` }}
+              >
+                {wardLabels.slice(0, 35).map((label, idx) => {
+                  if (!projector) return null;
+                  const [x, y] = projector([label.lon, label.lat]);
+                  return (
+                    <text
+                      key={`ward-${label.name}-${idx}`}
+                      x={x}
+                      y={y}
+                      dominantBaseline="middle"
+                    >
+                      {label.name}
+                    </text>
+                  );
                 })}
               </g>
             )}
           </>
         ) : (
+          // Fallback preview (no data)
           <>
             <path
               d="M30,120 L65,70 L120,45 L185,40 L245,62 L305,95 L290,160 L240,188 L165,197 L95,182 L48,152 Z"
@@ -290,93 +370,132 @@ function MapSettingsPreview({
               </g>
             )}
 
-            {showLabels && (
-              <g fill="#0f172a" textAnchor="middle" style={{ fontSize: `${safeFontSize}px` }}>
-                <text x="95" y="94">Ward A</text>
-                <text x="170" y="96">Ward B</text>
-                <text x="246" y="100">Ward C</text>
-                <text x="116" y="152">Ward D</text>
-                <text x="203" y="160">Ward E</text>
+            {showConstituencyLabels && (
+              <g
+                fill={constituencyBorderColor}
+                textAnchor="middle"
+                style={{ fontSize: `${safeConstFontSize}px` }}
+              >
+                <text x="95" y="94">
+                  Constituency A
+                </text>
+                <text x="170" y="96">
+                  Constituency B
+                </text>
+                <text x="246" y="100">
+                  Constituency C
+                </text>
+              </g>
+            )}
+            {showWardLabels && (
+              <g
+                fill={wardBorderColor}
+                textAnchor="middle"
+                style={{ fontSize: `${safeWardFontSize}px` }}
+              >
+                <text x="116" y="152">
+                  Ward D
+                </text>
+                <text x="203" y="160">
+                  Ward E
+                </text>
               </g>
             )}
           </>
         )}
       </svg>
     </div>
-  )
+  );
 }
 
-export function SystemConfiguration({
-  onBack,
-}: SystemConfigurationProps) {
-  const { access_token: token, isLoading: authLoading, user, status: authStatus } = useAuth()
+export function SystemConfiguration({ onBack }: SystemConfigurationProps) {
+  const {
+    access_token: token,
+    isLoading: authLoading,
+    user,
+    status: authStatus,
+  } = useAuth();
 
   const getCachedData = (): CachedSettings | null => {
-    if (typeof window === "undefined") return null
+    if (typeof window === "undefined") return null;
     try {
-      const cached = sessionStorage.getItem(STORAGE_KEY)
-      const parsed = cached ? JSON.parse(cached) : null
-      if (!parsed || parsed.version !== STORAGE_VERSION) return null
-      return parsed as CachedSettings
+      const cached = sessionStorage.getItem(STORAGE_KEY);
+      const parsed = cached ? JSON.parse(cached) : null;
+      if (!parsed || parsed.version !== STORAGE_VERSION) return null;
+      return parsed as CachedSettings;
     } catch {
-      return null
+      return null;
     }
-  }
+  };
 
-  const cached = getCachedData()
+  const cached = getCachedData();
 
-  const [loading, setLoading] = useState(!cached)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [saveMessage, setSaveMessage] = useState<string | null>(null)
+  const [loading, setLoading] = useState(!cached);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
-  const [shapefilePath, setShapefilePath] = useState(cached?.shapefilePath || "")
-  const [templates, setTemplates] = useState<Template[]>(cached?.templates || [])
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(cached?.selectedTemplateId || null)
-  const [showConstituencies, setShowConstituencies] = useState(cached?.showConstituencies ?? true)
-  const [showWards, setShowWards] = useState(cached?.showWards ?? true)
-  const [showLabels, setShowLabels] = useState(cached?.showLabels ?? true)
-  const [labelFontSize, setLabelFontSize] = useState(cached?.labelFontSize ?? 12)
+  const [shapefilePath, setShapefilePath] = useState(cached?.shapefilePath || "");
+  const [templates, setTemplates] = useState<Template[]>(cached?.templates || []);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(
+    cached?.selectedTemplateId || null
+  );
+  const [showConstituencies, setShowConstituencies] = useState(
+    cached?.showConstituencies ?? true
+  );
+  const [showWards, setShowWards] = useState(cached?.showWards ?? true);
+  const [showConstituencyLabels, setShowConstituencyLabels] = useState(
+    cached?.showConstituencyLabels ?? true
+  );
+  const [showWardLabels, setShowWardLabels] = useState(
+    cached?.showWardLabels ?? true
+  );
+  const [constituencyLabelFontSize, setConstituencyLabelFontSize] = useState(
+    cached?.constituencyLabelFontSize ?? 12
+  );
+  const [wardLabelFontSize, setWardLabelFontSize] = useState(
+    cached?.wardLabelFontSize ?? 12
+  );
   const [constituencyBorderColor, setConstituencyBorderColor] = useState(
     cached?.constituencyBorderColor || DEFAULT_CONSTITUENCY_BORDER_COLOR
-  )
+  );
   const [constituencyBorderWidth, setConstituencyBorderWidth] = useState(
     cached?.constituencyBorderWidth ?? DEFAULT_CONSTITUENCY_BORDER_WIDTH
-  )
+  );
   const [constituencyBorderStyle, setConstituencyBorderStyle] = useState(
     cached?.constituencyBorderStyle || DEFAULT_CONSTITUENCY_BORDER_STYLE
-  )
+  );
   const [wardBorderColor, setWardBorderColor] = useState(
     cached?.wardBorderColor || DEFAULT_WARD_BORDER_COLOR
-  )
+  );
   const [wardBorderWidth, setWardBorderWidth] = useState(
     cached?.wardBorderWidth ?? DEFAULT_WARD_BORDER_WIDTH
-  )
+  );
   const [wardBorderStyle, setWardBorderStyle] = useState(
     cached?.wardBorderStyle || DEFAULT_WARD_BORDER_STYLE
-  )
-  const [previewData, setPreviewData] = useState<MapPreviewResponse | null>(null)
-  const [previewLoading, setPreviewLoading] = useState(false)
-  const [previewError, setPreviewError] = useState<string | null>(null)
+  );
+  const [previewData, setPreviewData] = useState<MapPreviewResponse | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!authLoading && !token) {
       if (authStatus === "expired") {
-        setLoading(false)
-        setError("Session expired. Please sign in again.")
-        return
+        setLoading(false);
+        setError("Session expired. Please sign in again.");
+        return;
       }
-      setError(null)
-      setLoading(true)
-      return
+      setError(null);
+      setLoading(true);
+      return;
     }
 
-    if (authLoading || !token) return
+    if (authLoading || !token) return;
 
     const fetchSettings = async () => {
       try {
-        if (!cached) setLoading(true)
-        const data = await SettingsService.getSettings(token)
+        if (!cached) setLoading(true);
+        const data = await SettingsService.getSettings(token);
 
         const settingsData: CachedSettings = {
           version: STORAGE_VERSION,
@@ -385,109 +504,128 @@ export function SystemConfiguration({
           selectedTemplateId: data.user_settings?.pdf_template_id || null,
           showConstituencies: data.user_settings?.show_constituencies ?? true,
           showWards: data.user_settings?.show_wards ?? true,
-          showLabels: data.user_settings?.show_labels ?? true,
-          labelFontSize: clampFontSize(data.user_settings?.label_font_size ?? 12),
-          constituencyBorderColor: data.user_settings?.constituency_border_color || DEFAULT_CONSTITUENCY_BORDER_COLOR,
+          showConstituencyLabels: data.user_settings?.show_constituency_labels ?? true,
+          showWardLabels: data.user_settings?.show_ward_labels ?? true,
+          constituencyLabelFontSize: clampFontSize(
+            data.user_settings?.constituency_label_font_size ?? 12
+          ),
+          wardLabelFontSize: clampFontSize(
+            data.user_settings?.ward_label_font_size ?? 12
+          ),
+          constituencyBorderColor:
+            data.user_settings?.constituency_border_color ||
+            DEFAULT_CONSTITUENCY_BORDER_COLOR,
           constituencyBorderWidth:
-            data.user_settings?.constituency_border_width ?? DEFAULT_CONSTITUENCY_BORDER_WIDTH,
+            data.user_settings?.constituency_border_width ??
+            DEFAULT_CONSTITUENCY_BORDER_WIDTH,
           constituencyBorderStyle:
-            data.user_settings?.constituency_border_style || DEFAULT_CONSTITUENCY_BORDER_STYLE,
-          wardBorderColor: data.user_settings?.ward_border_color || DEFAULT_WARD_BORDER_COLOR,
-          wardBorderWidth: data.user_settings?.ward_border_width ?? DEFAULT_WARD_BORDER_WIDTH,
-          wardBorderStyle: data.user_settings?.ward_border_style || DEFAULT_WARD_BORDER_STYLE,
-        }
+            data.user_settings?.constituency_border_style ||
+            DEFAULT_CONSTITUENCY_BORDER_STYLE,
+          wardBorderColor:
+            data.user_settings?.ward_border_color || DEFAULT_WARD_BORDER_COLOR,
+          wardBorderWidth:
+            data.user_settings?.ward_border_width ?? DEFAULT_WARD_BORDER_WIDTH,
+          wardBorderStyle:
+            data.user_settings?.ward_border_style || DEFAULT_WARD_BORDER_STYLE,
+        };
 
-        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(settingsData))
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(settingsData));
 
-        setShapefilePath(settingsData.shapefilePath)
-        setTemplates(settingsData.templates)
-        setSelectedTemplateId(settingsData.selectedTemplateId)
-        setShowConstituencies(settingsData.showConstituencies)
-        setShowWards(settingsData.showWards)
-        setShowLabels(settingsData.showLabels)
-        setLabelFontSize(settingsData.labelFontSize)
-        setConstituencyBorderColor(settingsData.constituencyBorderColor)
-        setConstituencyBorderWidth(settingsData.constituencyBorderWidth)
-        setConstituencyBorderStyle(settingsData.constituencyBorderStyle)
-        setWardBorderColor(settingsData.wardBorderColor)
-        setWardBorderWidth(settingsData.wardBorderWidth)
-        setWardBorderStyle(settingsData.wardBorderStyle)
-        if (!cached) setLoading(false)
+        setShapefilePath(settingsData.shapefilePath);
+        setTemplates(settingsData.templates);
+        setSelectedTemplateId(settingsData.selectedTemplateId);
+        setShowConstituencies(settingsData.showConstituencies);
+        setShowWards(settingsData.showWards);
+        setShowConstituencyLabels(settingsData.showConstituencyLabels);
+        setShowWardLabels(settingsData.showWardLabels);
+        setConstituencyLabelFontSize(settingsData.constituencyLabelFontSize);
+        setWardLabelFontSize(settingsData.wardLabelFontSize);
+        setConstituencyBorderColor(settingsData.constituencyBorderColor);
+        setConstituencyBorderWidth(settingsData.constituencyBorderWidth);
+        setConstituencyBorderStyle(settingsData.constituencyBorderStyle);
+        setWardBorderColor(settingsData.wardBorderColor);
+        setWardBorderWidth(settingsData.wardBorderWidth);
+        setWardBorderStyle(settingsData.wardBorderStyle);
+        if (!cached) setLoading(false);
       } catch (err) {
         if (!cached) {
-          setError(err instanceof Error ? err.message : "Failed to load settings")
-          setLoading(false)
+          setError(err instanceof Error ? err.message : "Failed to load settings");
+          setLoading(false);
         }
       }
-    }
+    };
 
     if (cached) {
-      setLoading(false)
+      setLoading(false);
     }
 
-    fetchSettings()
-  }, [token, authLoading, authStatus])
+    fetchSettings();
+  }, [token, authLoading, authStatus]);
 
   useEffect(() => {
-    if (authLoading) return
+    if (authLoading) return;
     if (!token) {
-      setPreviewData(null)
-      return
+      setPreviewData(null);
+      return;
     }
-    const county = user?.county
+    const county = user?.county;
     if (!county) {
-      setPreviewError("Set your county in profile to see a map preview.")
-      setPreviewData(null)
-      return
+      setPreviewError("Set your county in profile to see a map preview.");
+      setPreviewData(null);
+      return;
     }
 
-    let active = true
-    setPreviewLoading(true)
-    setPreviewError(null)
+    let active = true;
+    setPreviewLoading(true);
+    setPreviewError(null);
 
     SettingsService.getCountyPreview(token, county)
       .then((data) => {
-        if (!active) return
-        setPreviewData(data)
+        if (!active) return;
+        setPreviewData(data);
       })
       .catch((err) => {
-        if (!active) return
-        setPreviewError(err instanceof Error ? err.message : "Failed to load map preview")
+        if (!active) return;
+        setPreviewError(err instanceof Error ? err.message : "Failed to load map preview");
       })
       .finally(() => {
-        if (!active) return
-        setPreviewLoading(false)
-      })
+        if (!active) return;
+        setPreviewLoading(false);
+      });
 
     return () => {
-      active = false
-    }
-  }, [token, authLoading, user?.county])
+      active = false;
+    };
+  }, [token, authLoading, user?.county]);
 
   const handleSaveConfiguration = async () => {
-    if (!token) return
+    if (!token) return;
 
     try {
-      setSaving(true)
-      setSaveMessage(null)
-      setError(null)
+      setSaving(true);
+      setSaveMessage(null);
+      setError(null);
 
-      const safeFontSize = clampFontSize(labelFontSize)
+      const safeConstFontSize = clampFontSize(constituencyLabelFontSize);
+      const safeWardFontSize = clampFontSize(wardLabelFontSize);
       await SettingsService.updateSettings(token, {
         pdf_template_id: selectedTemplateId,
         show_constituencies: showConstituencies,
         show_wards: showWards,
-        show_labels: showLabels,
-        label_font_size: safeFontSize,
+        show_constituency_labels: showConstituencyLabels,
+        show_ward_labels: showWardLabels,
+        constituency_label_font_size: safeConstFontSize,
+        ward_label_font_size: safeWardFontSize,
         constituency_border_color: constituencyBorderColor,
         constituency_border_width: constituencyBorderWidth,
         constituency_border_style: constituencyBorderStyle,
         ward_border_color: wardBorderColor,
         ward_border_width: wardBorderWidth,
         ward_border_style: wardBorderStyle,
-      })
+      });
 
-      setLabelFontSize(safeFontSize)
+      setConstituencyLabelFontSize(safeConstFontSize);
+      setWardLabelFontSize(safeWardFontSize);
       const updatedCache: CachedSettings = {
         version: STORAGE_VERSION,
         shapefilePath,
@@ -495,28 +633,30 @@ export function SystemConfiguration({
         selectedTemplateId,
         showConstituencies,
         showWards,
-        showLabels,
-        labelFontSize: safeFontSize,
+        showConstituencyLabels,
+        showWardLabels,
+        constituencyLabelFontSize: safeConstFontSize,
+        wardLabelFontSize: safeWardFontSize,
         constituencyBorderColor,
         constituencyBorderWidth,
         constituencyBorderStyle,
         wardBorderColor,
         wardBorderWidth,
         wardBorderStyle,
-      }
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(updatedCache))
-      setSaveMessage("Settings saved")
+      };
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(updatedCache));
+      setSaveMessage("Settings saved");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save settings")
+      setError(err instanceof Error ? err.message : "Failed to save settings");
     } finally {
-      setSaving(false)
+      setSaving(false);
     }
-  }
+  };
 
   const templateOptions = templates.map((t) => ({
     value: t.id,
     label: t.is_default ? `${t.file_name} (Default)` : t.file_name,
-  }))
+  }));
 
   if (loading || authLoading) {
     return (
@@ -526,7 +666,7 @@ export function SystemConfiguration({
           <p className="text-muted-foreground">Loading system settings...</p>
         </div>
       </div>
-    )
+    );
   }
 
   if (error) {
@@ -538,9 +678,9 @@ export function SystemConfiguration({
           <p className="text-sm text-muted-foreground mb-6">{error}</p>
           <button
             onClick={() => {
-              setError(null)
-              sessionStorage.removeItem(STORAGE_KEY)
-              window.location.reload()
+              setError(null);
+              sessionStorage.removeItem(STORAGE_KEY);
+              window.location.reload();
             }}
             className="px-6 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
           >
@@ -548,7 +688,7 @@ export function SystemConfiguration({
           </button>
         </div>
       </div>
-    )
+    );
   }
 
   return (
@@ -607,6 +747,7 @@ export function SystemConfiguration({
           </p>
         </div>
 
+        {/* Constituency Section */}
         <label className="flex items-center gap-3 text-sm text-foreground">
           <input
             type="checkbox"
@@ -618,44 +759,73 @@ export function SystemConfiguration({
         </label>
 
         {showConstituencies && (
-          <div className="ml-7 grid gap-4 sm:grid-cols-3">
-            <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1">
-                Border Color
-              </label>
+          <div className="ml-7 space-y-4">
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">
+                  Border Color
+                </label>
+                <input
+                  type="color"
+                  value={constituencyBorderColor}
+                  onChange={(e) => setConstituencyBorderColor(e.target.value)}
+                  className="w-8 h-8 rounded border border-border bg-card cursor-pointer p-0 overflow-hidden"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">
+                  Border Thickness
+                </label>
+                <input
+                  type="number"
+                  min={0.1}
+                  step={0.1}
+                  value={constituencyBorderWidth}
+                  onChange={(e) => setConstituencyBorderWidth(Number(e.target.value))}
+                  className="w-full px-4 py-2 rounded-lg border border-border bg-card text-card-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">
+                  Border Style
+                </label>
+                <SelectInput
+                  value={constituencyBorderStyle}
+                  onChange={setConstituencyBorderStyle}
+                  options={BORDER_STYLE_OPTIONS}
+                />
+              </div>
+            </div>
+            <label className="flex items-center gap-3 text-sm text-foreground">
               <input
-                type="text"
-                value={constituencyBorderColor}
-                onChange={(e) => setConstituencyBorderColor(e.target.value)}
-                className="w-full px-4 py-2 rounded-lg border border-border bg-card text-card-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                type="checkbox"
+                checked={showConstituencyLabels}
+                onChange={(e) => setShowConstituencyLabels(e.target.checked)}
+                className="h-4 w-4 rounded border-border"
               />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1">
-                Border Thickness
-              </label>
-              <input
-                type="number"
-                min={0.1}
-                step={0.1}
-                value={constituencyBorderWidth}
-                onChange={(e) => setConstituencyBorderWidth(Number(e.target.value))}
-                className="w-full px-4 py-2 rounded-lg border border-border bg-card text-card-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1">
-                Border Style
-              </label>
-              <SelectInput
-                value={constituencyBorderStyle}
-                onChange={setConstituencyBorderStyle}
-                options={BORDER_STYLE_OPTIONS}
-              />
-            </div>
+              Show Constituency Labels (color matches border)
+            </label>
+            {showConstituencyLabels && (
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">
+                  Constituency Label Font Size
+                </label>
+                <input
+                  type="number"
+                  min={6}
+                  max={48}
+                  value={constituencyLabelFontSize}
+                  onChange={(e) =>
+                    setConstituencyLabelFontSize(clampFontSize(Number(e.target.value)))
+                  }
+                  className="w-40 px-4 py-2 rounded-lg border border-border bg-card text-card-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </div>
+            )}
           </div>
         )}
 
+        {/* Ward Section */}
         <label className="flex items-center gap-3 text-sm text-foreground">
           <input
             type="checkbox"
@@ -667,71 +837,79 @@ export function SystemConfiguration({
         </label>
 
         {showWards && (
-          <div className="ml-7 grid gap-4 sm:grid-cols-3">
-            <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1">
-                Border Color
-              </label>
+          <div className="ml-7 space-y-4">
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">
+                  Border Color
+                </label>
+                <input
+                  type="color"
+                  value={wardBorderColor}
+                  onChange={(e) => setWardBorderColor(e.target.value)}
+                  className="w-8 h-8 rounded border border-border bg-card cursor-pointer p-0 overflow-hidden"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">
+                  Border Thickness
+                </label>
+                <input
+                  type="number"
+                  min={0.1}
+                  step={0.1}
+                  value={wardBorderWidth}
+                  onChange={(e) => setWardBorderWidth(Number(e.target.value))}
+                  className="w-full px-4 py-2 rounded-lg border border-border bg-card text-card-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">
+                  Border Style
+                </label>
+                <SelectInput
+                  value={wardBorderStyle}
+                  onChange={setWardBorderStyle}
+                  options={BORDER_STYLE_OPTIONS}
+                />
+              </div>
+            </div>
+            <label className="flex items-center gap-3 text-sm text-foreground">
               <input
-                type="text"
-                value={wardBorderColor}
-                onChange={(e) => setWardBorderColor(e.target.value)}
-                className="w-full px-4 py-2 rounded-lg border border-border bg-card text-card-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                type="checkbox"
+                checked={showWardLabels}
+                onChange={(e) => setShowWardLabels(e.target.checked)}
+                className="h-4 w-4 rounded border-border"
               />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1">
-                Border Thickness
-              </label>
-              <input
-                type="number"
-                min={0.1}
-                step={0.1}
-                value={wardBorderWidth}
-                onChange={(e) => setWardBorderWidth(Number(e.target.value))}
-                className="w-full px-4 py-2 rounded-lg border border-border bg-card text-card-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1">
-                Border Style
-              </label>
-              <SelectInput
-                value={wardBorderStyle}
-                onChange={setWardBorderStyle}
-                options={BORDER_STYLE_OPTIONS}
-              />
-            </div>
+              Show Ward Labels (color matches border)
+            </label>
+            {showWardLabels && (
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">
+                  Ward Label Font Size
+                </label>
+                <input
+                  type="number"
+                  min={6}
+                  max={48}
+                  value={wardLabelFontSize}
+                  onChange={(e) =>
+                    setWardLabelFontSize(clampFontSize(Number(e.target.value)))
+                  }
+                  className="w-40 px-4 py-2 rounded-lg border border-border bg-card text-card-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </div>
+            )}
           </div>
         )}
-
-        <label className="flex items-center gap-3 text-sm text-foreground">
-          <input
-            type="checkbox"
-            checked={showLabels}
-            onChange={(e) => setShowLabels(e.target.checked)}
-            className="h-4 w-4 rounded border-border"
-          />
-          Show Labels
-        </label>
-
-        <div>
-          <label className="block text-sm font-medium text-foreground mb-2">Label Font Size</label>
-          <input
-            type="number"
-            min={6}
-            max={48}
-            value={labelFontSize}
-            onChange={(e) => setLabelFontSize(clampFontSize(Number(e.target.value)))}
-            className="w-40 px-4 py-2 rounded-lg border border-border bg-card text-card-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-          />
-        </div>
 
         <MapSettingsPreview
           showConstituencies={showConstituencies}
           showWards={showWards}
-          showLabels={showLabels}
-          labelFontSize={labelFontSize}
+          showConstituencyLabels={showConstituencyLabels}
+          showWardLabels={showWardLabels}
+          constituencyLabelFontSize={constituencyLabelFontSize}
+          wardLabelFontSize={wardLabelFontSize}
           constituencyBorderColor={constituencyBorderColor}
           constituencyBorderWidth={constituencyBorderWidth}
           constituencyBorderStyle={constituencyBorderStyle}
@@ -756,5 +934,5 @@ export function SystemConfiguration({
         {saveMessage && <p className="text-xs text-emerald-600">{saveMessage}</p>}
       </div>
     </div>
-  )
+  );
 }
