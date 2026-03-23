@@ -72,25 +72,37 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         headers={"Access-Control-Allow-Origin": ",".join(settings.cors_origins_list)},
     )
 
+# -----------------------------
+# Handle preflight OPTIONS requests
+# -----------------------------
+@app.options("/{full_path:path}")
+async def preflight_handler(request: Request, full_path: str):
+    return JSONResponse(
+        status_code=200,
+        content={"detail": "CORS preflight"},
+        headers={
+            "Access-Control-Allow-Origin": ",".join(settings.cors_origins_list),
+            "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "Authorization, Content-Type",
+            "Access-Control-Allow-Credentials": "true",
+        },
+    )
+
 @app.on_event("startup")
 async def startup_event():
-    """Application startup event."""
     logger.info("application_starting", version=settings.APP_VERSION)
-    logger.info("database_url_configured", url=settings.SUPABASE_URL.split("@")[-1] if "@" in settings.SUPABASE_URL else "not_set")
-    
-    # Add auth initialization if needed
+    logger.info(
+        "database_url_configured",
+        url=settings.SUPABASE_URL.split("@")[-1] if "@" in settings.SUPABASE_URL else "not_set",
+    )
     logger.info("auth_initialized", provider="Supabase")
-
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Application shutdown event."""
     logger.info("application_shutting_down")
-
 
 @app.get("/")
 async def root():
-    """Root endpoint."""
     return {
         "name": settings.APP_NAME,
         "version": settings.APP_VERSION,
