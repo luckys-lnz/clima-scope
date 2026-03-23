@@ -3,10 +3,8 @@ FastAPI Application Entry Point
 
 Main application setup and configuration.
 """
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
@@ -45,64 +43,25 @@ app.include_router(report.router, prefix=f"{settings.API_V1_PREFIX}/reports", ta
 app.include_router(dashboard.router, prefix=f"{settings.API_V1_PREFIX}/dashboard", tags=["dashboard"])
 app.include_router(workflow.router, prefix=f"{settings.API_V1_PREFIX}/workflow", tags=["workflow"])
 
-# -----------------------------
-# Global exception handlers to ensure CORS headers are present
-# -----------------------------
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException):
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"detail": exc.detail},
-        headers={"Access-Control-Allow-Origin": ",".join(settings.cors_origins_list)},
-    )
-
-@app.exception_handler(Exception)
-async def general_exception_handler(request: Request, exc: Exception):
-    return JSONResponse(
-        status_code=500,
-        content={"detail": str(exc)},
-        headers={"Access-Control-Allow-Origin": ",".join(settings.cors_origins_list)},
-    )
-
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    return JSONResponse(
-        status_code=422,
-        content={"detail": exc.errors()},
-        headers={"Access-Control-Allow-Origin": ",".join(settings.cors_origins_list)},
-    )
-
-# -----------------------------
-# Handle preflight OPTIONS requests
-# -----------------------------
-@app.options("/{full_path:path}")
-async def preflight_handler(request: Request, full_path: str):
-    return JSONResponse(
-        status_code=200,
-        content={"detail": "CORS preflight"},
-        headers={
-            "Access-Control-Allow-Origin": ",".join(settings.cors_origins_list),
-            "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-            "Access-Control-Allow-Headers": "Authorization, Content-Type",
-            "Access-Control-Allow-Credentials": "true",
-        },
-    )
-
 @app.on_event("startup")
 async def startup_event():
+    """Application startup event."""
     logger.info("application_starting", version=settings.APP_VERSION)
-    logger.info(
-        "database_url_configured",
-        url=settings.SUPABASE_URL.split("@")[-1] if "@" in settings.SUPABASE_URL else "not_set",
-    )
+    logger.info("database_url_configured", url=settings.SUPABASE_URL.split("@")[-1] if "@" in settings.SUPABASE_URL else "not_set")
+    
+    # Add auth initialization if needed
     logger.info("auth_initialized", provider="Supabase")
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
+    """Application shutdown event."""
     logger.info("application_shutting_down")
+
 
 @app.get("/")
 async def root():
+    """Root endpoint."""
     return {
         "name": settings.APP_NAME,
         "version": settings.APP_VERSION,
