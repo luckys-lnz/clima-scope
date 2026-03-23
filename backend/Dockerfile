@@ -4,7 +4,7 @@ FROM python:3.9.5-slim
 # Set working directory inside container
 WORKDIR /app
 
-# Install system dependencies needed for Python packages
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     gcc \
@@ -14,18 +14,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements.txt from current directory
+# Copy requirements first (for caching)
 COPY requirements.txt .
 
-# Upgrade pip and install Python dependencies
+# Install Python dependencies
 RUN pip install --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
-# Copy all backend code from current directory
+# Copy all backend code
 COPY . /app
 
-# Expose port for Heroku / Railpack
+# Use dynamic port (Heroku/Railpack friendly)
 ENV PORT=8000
 
-# Start the backend app with uvicorn
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Start the backend app
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT}"]
