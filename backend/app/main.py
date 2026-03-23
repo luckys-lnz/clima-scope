@@ -3,8 +3,10 @@ FastAPI Application Entry Point
 
 Main application setup and configuration.
 """
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
@@ -42,6 +44,33 @@ app.include_router(setting.router, prefix=f"{settings.API_V1_PREFIX}/setting", t
 app.include_router(report.router, prefix=f"{settings.API_V1_PREFIX}/reports", tags=["reports"])
 app.include_router(dashboard.router, prefix=f"{settings.API_V1_PREFIX}/dashboard", tags=["dashboard"])
 app.include_router(workflow.router, prefix=f"{settings.API_V1_PREFIX}/workflow", tags=["workflow"])
+
+# -----------------------------
+# Global exception handlers to ensure CORS headers are present
+# -----------------------------
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+        headers={"Access-Control-Allow-Origin": ",".join(settings.cors_origins_list)},
+    )
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(exc)},
+        headers={"Access-Control-Allow-Origin": ",".join(settings.cors_origins_list)},
+    )
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors()},
+        headers={"Access-Control-Allow-Origin": ",".join(settings.cors_origins_list)},
+    )
 
 @app.on_event("startup")
 async def startup_event():
