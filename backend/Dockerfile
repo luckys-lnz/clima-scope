@@ -1,7 +1,7 @@
 # Use Python 3.9.5 slim base image
 FROM python:3.9.5-slim
 
-# Set working directory inside backend
+# Set working directory inside container
 WORKDIR /app
 
 # Install system dependencies needed for Python packages
@@ -14,18 +14,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements.txt from backend folder
-COPY backend/requirements.txt .
+# Copy requirements.txt from current directory
+COPY requirements.txt .
 
 # Upgrade pip and install Python dependencies
 RUN pip install --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
-# Copy backend code
-COPY backend /app
+# Copy all backend code from current directory
+COPY . /app
 
-# Expose port for Railpack / Heroku
+# Expose port for Heroku / Railpack
 ENV PORT=8000
 
-# Start the backend app
+# Start the backend app with uvicorn
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
