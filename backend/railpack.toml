@@ -1,0 +1,5 @@
+[phases.setup]
+nixPkgs = ["gdal", "libexpat", "python39Packages.numpy"]
+
+[phases.install]
+aptPkgs = ["gdal-bin", "libgdal-dev", "libexpat1-dev", "build-essential"]
