@@ -1,3 +1,4 @@
+from app.utils.geospatial_compat import ensure_fiona_path
 from fastapi import APIRouter, HTTPException, Depends, Query
 import pandas as pd
 import numpy as np
@@ -112,6 +113,7 @@ def _load_subcounty_ward_map(
         if not local_shapefile_path:
             return []
 
+        ensure_fiona_path()
         import geopandas as gpd
 
         wards_gdf = gpd.read_file(local_shapefile_path)

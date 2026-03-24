@@ -1,6 +1,10 @@
 """
 Map generation utilities for weather variables
 """
+from app.utils.geospatial_compat import ensure_fiona_path
+
+ensure_fiona_path()
+
 import geopandas as gpd
 import pandas as pd
 import numpy as np
