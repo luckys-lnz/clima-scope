@@ -1,9 +1,5 @@
-import { PricingSection } from "@/components/marketing/pricing-section"
+import { redirect } from "next/navigation"
 
 export default function PricingPage() {
-  return (
-    <main className="min-h-screen bg-background text-foreground">
-      <PricingSection headingLevel="h1" />
-    </main>
-  )
+  redirect("/#pricing")
 }
