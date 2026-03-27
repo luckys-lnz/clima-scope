@@ -4,11 +4,9 @@ import { useId, useState } from "react"
 import { Check, Loader2, X } from "lucide-react"
 
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Card,
-  CardAction,
   CardContent,
   CardDescription,
   CardFooter,
@@ -28,7 +26,7 @@ const BILLING_CONFIG = {
     label: "Billed monthly",
   },
   annual: {
-    multiplier: 0.8,
+    multiplier: 12,
     label: "Billed annually",
   },
 } as const satisfies Record<BillingCycle, { multiplier: number; label: string }>
@@ -37,6 +35,14 @@ const HEADING_STYLES: Record<HeadingLevel, string> = {
   h1: "text-4xl sm:text-5xl font-bold",
   h2: "text-3xl sm:text-4xl font-bold",
 }
+
+const USD_TO_KES = 160
+const formatKes = (amountKes: number) =>
+  new Intl.NumberFormat("en-KE", {
+    style: "currency",
+    currency: "KES",
+    maximumFractionDigits: 0,
+  }).format(amountKes)
 
 interface PricingSectionProps {
   id?: string
@@ -59,7 +65,7 @@ export function PricingSection({
   const HeadingTag = headingLevel
 
   return (
-    <section id={id} className={className}>
+    <section id={id} className={cn("scroll-mt-24", className)}>
       <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-16">
         <div className="text-center space-y-4">
           <HeadingTag className={HEADING_STYLES[headingLevel]}>
@@ -97,40 +103,34 @@ export function PricingSection({
             >
               Annual
             </span>
-            {isAnnual && <Badge variant="secondary">Save 20%</Badge>}
           </div>
         </div>
 
-        <div className="mt-10 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-10 flex justify-center">
           {PRICING_PLANS.map((plan) => {
-            const price = Math.round(plan.monthly * BILLING_CONFIG[billingCycle].multiplier)
+            const priceUsd = plan.monthly * BILLING_CONFIG[billingCycle].multiplier
+            const priceKes = Math.round(priceUsd * USD_TO_KES)
             const isLoading = loadingPlan === plan.id
 
             return (
               <Card
                 key={plan.id}
-                className={cn(
-                  "h-full",
-                  plan.isPopular && "ring-2 ring-primary",
-                )}
+                className="w-full max-w-md"
               >
                 <CardHeader>
                   <div className="space-y-2">
                     <CardTitle className="text-xl">{plan.name}</CardTitle>
                     <CardDescription>{plan.description}</CardDescription>
                   </div>
-                  {plan.isPopular && (
-                    <CardAction>
-                      <Badge>Most Popular</Badge>
-                    </CardAction>
-                  )}
                 </CardHeader>
                 <CardContent className="flex-1 space-y-6">
                   <div className="space-y-2">
                     <div className="flex items-end gap-2">
-                      <span className="text-4xl font-semibold">${price}</span>
+                      <span className="text-4xl font-semibold">
+                        {formatKes(priceKes)}
+                      </span>
                       <span className="text-sm text-muted-foreground">
-                        /month
+                        {isAnnual ? "/year" : "/month"}
                       </span>
                     </div>
                     <p className="text-xs text-muted-foreground">
