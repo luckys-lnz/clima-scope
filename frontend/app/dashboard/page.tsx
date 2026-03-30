@@ -7,6 +7,7 @@ import {
   Archive,
   Upload,
   Settings,
+  CreditCard,
   MapPin,
   Menu,
   X,
@@ -245,6 +246,14 @@ export default function Dashboard() {
                   </button>
                 )
               })}
+              <Link
+                href="/pricing"
+                className="w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                onClick={() => setSidebarOpen(false)}
+              >
+                <CreditCard className="w-5 h-5" />
+                <span>Pricing &amp; Plans</span>
+              </Link>
             </nav>
           </aside>
 

@@ -3,7 +3,7 @@ import type { Button } from "@/components/ui/button"
 
 type ButtonVariant = NonNullable<ComponentProps<typeof Button>["variant"]>
 
-export type PlanId = "standard"
+export type PlanId = "pro"
 
 export type PricingFeature = Readonly<{
   label: string
@@ -17,6 +17,7 @@ export type PricingPlan = Readonly<{
   monthly: number
   cta: string
   ctaVariant: ButtonVariant
+  isPopular: boolean
   features: ReadonlyArray<PricingFeature>
 }>
 
@@ -27,14 +28,18 @@ export type PricingFaq = Readonly<{
 
 export const PRICING_PLANS = [
   {
-    id: "standard",
-    name: "Standard",
-    description: "For county and regional teams publishing weekly reports.",
-    monthly: 10,
-    cta: "Get Started",
+
+    id: "pro",
+    name: "Weather Reporting",
+    description: "One plan with flexible monthly or yearly billing.",
+    monthly: 1000,
+    cta: "Go Pro",
     ctaVariant: "default",
+    isPopular: false,
     features: [
-      { label: "Weekly PDF reports", included: true },
+      { label: "All counties", included: true },
+      { label: "Weekly + on-demand reports", included: true },
+
       { label: "Ward-level breakdowns", included: true },
       { label: "Automation scheduler", included: true },
       { label: "Email distribution", included: true },
@@ -62,6 +67,12 @@ export const PRICING_FAQS = [
   {
     question: "Do you offer annual billing discounts?",
     answer:
-      "Annual billing is available if your organization prefers a single payment cycle.",
+      "Yes. Yearly billing is KES 10,000 instead of KES 12,000, which is a 16.67% discount.",
+  },
+  {
+    question: "What's included in Enterprise support?",
+    answer:
+      "Enterprise includes onboarding, implementation guidance, and a dedicated support channel with an SLA.",
+
   },
 ] as const satisfies ReadonlyArray<PricingFaq>

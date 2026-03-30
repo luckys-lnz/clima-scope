@@ -1,3 +1,7 @@
+from app.utils.geospatial_compat import ensure_fiona_path
+
+ensure_fiona_path()
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from app.schemas.setting import (
     SettingsResponse,
