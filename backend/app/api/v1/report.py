@@ -4,6 +4,8 @@ from datetime import timedelta, datetime
 from typing import List
 from uuid import UUID
 import io
+import json
+import re
 import pandas as pd
 
 from app.schemas.report import ReportArchiveItem
@@ -48,6 +50,113 @@ def _extract_centroid_from_observation_csv(csv_bytes: bytes):
 
     lat, lon = centroid_from_rows(latitudes, longitudes)
     return {"lat": float(lat), "lon": float(lon)}
+
+
+def _extract_numeric_values(text: str) -> List[float]:
+    if not text:
+        return []
+    return [float(x) for x in re.findall(r"\d+(?:\.\d+)?", str(text))]
+
+
+def _format_range(values: List[float]) -> str:
+    if not values:
+        return ""
+    return f"{min(values):.0f}–{max(values):.0f}"
+
+
+def _summarize_morning_conditions(rows: List[str]) -> str:
+    if not rows:
+        return "cloudy mornings with sunny intervals"
+    bucket = {"sunny": 0, "cloudy": 0, "rain": 0}
+    for row in rows:
+        text = str(row or "").lower()
+        if any(word in text for word in ["rain", "showers", "drizzle", "storm"]):
+            bucket["rain"] += 1
+        elif any(word in text for word in ["cloud", "overcast"]):
+            bucket["cloudy"] += 1
+        elif any(word in text for word in ["sun", "clear"]):
+            bucket["sunny"] += 1
+    if bucket["rain"] >= max(bucket["cloudy"], bucket["sunny"]):
+        return "cloudy mornings with light showers"
+    if bucket["cloudy"] >= bucket["sunny"]:
+        return "cloudy mornings with sunny intervals"
+    return "mostly sunny mornings"
+
+
+def _build_weekly_narrative_summary(report_data: dict, fallback_text: str) -> str:
+    sub_counties = (report_data or {}).get("sub_counties") or []
+    if not sub_counties:
+        return fallback_text or ""
+
+    max_values: List[float] = []
+    min_values: List[float] = []
+    wind_values: List[float] = []
+    morning_values: List[str] = []
+    for sub in sub_counties:
+        forecast = sub.get("forecast") or {}
+        for _, day_rows in forecast.items():
+            max_values += _extract_numeric_values(day_rows.get("Maximum temperature", ""))
+            min_values += _extract_numeric_values(day_rows.get("Minimum temperature", ""))
+            wind_values += _extract_numeric_values(day_rows.get("Winds", ""))
+            morning_values.append(str(day_rows.get("Morning", "")))
+
+    max_range = _format_range(max_values) or "30–34"
+    min_range = _format_range(min_values) or "21–25"
+    wind_range = _format_range(wind_values) or "10–25"
+    morning_phrase = _summarize_morning_conditions(morning_values)
+
+    lines = [
+        f"• The county will generally experience {morning_phrase} through the week, with mostly dry conditions across all sub-counties. Light showers may occur in a few places.",
+        f"• Maximum/Daytime temperatures are expected to range from {max_range}°C.",
+        f"• Minimum/Night temperatures are expected to range from {min_range}°C.",
+        f"• Moderate to strong Northeasterly (NE) to East-Northeasterly (ENE) winds ({wind_range} knots) are expected throughout the week.",
+        "• Marine users are strongly advised to exercise caution the rest of the week.",
+        "• Any significant change in the forecast will be shared in your WhatsApp groups.",
+    ]
+    return "\n".join(lines)
+
+
+def _build_forecast_summary_from_report_data(report_data: dict) -> dict:
+    sub_counties = (report_data or {}).get("sub_counties") or []
+    if not sub_counties:
+        return {}
+
+    max_values: List[float] = []
+    min_values: List[float] = []
+    wind_values: List[float] = []
+    rain_values_by_day: dict[str, float] = {}
+
+    for sub in sub_counties:
+        forecast = sub.get("forecast") or {}
+        for day_label, day_rows in forecast.items():
+            max_values += _extract_numeric_values(day_rows.get("Maximum temperature", ""))
+            min_values += _extract_numeric_values(day_rows.get("Minimum temperature", ""))
+            wind_values += _extract_numeric_values(day_rows.get("Winds", ""))
+            rain_values = _extract_numeric_values(day_rows.get("Rainfall distribution", ""))
+            if rain_values:
+                rain_values_by_day[day_label] = rain_values_by_day.get(day_label, 0.0) + sum(rain_values)
+
+    mean_temperature = None
+    if max_values and min_values:
+        mean_temperature = round((sum(max_values) / len(max_values) + sum(min_values) / len(min_values)) / 2.0, 2)
+    elif max_values:
+        mean_temperature = round(sum(max_values) / len(max_values), 2)
+    elif min_values:
+        mean_temperature = round(sum(min_values) / len(min_values), 2)
+
+    max_wind_speed = round(max(wind_values), 2) if wind_values else None
+    # "Total Rainfall" card should show average daily rainfall across the 7-day window.
+    rainfall_sum = (
+        round(sum(rain_values_by_day.values()) / len(rain_values_by_day), 2)
+        if rain_values_by_day
+        else None
+    )
+
+    return {
+        "mean_temperature": mean_temperature,
+        "max_wind_speed": max_wind_speed,
+        "rainfall_sum": rainfall_sum,
+    }
 
 
 @router.get("", response_model=List[ReportArchiveItem])
@@ -163,6 +272,29 @@ async def get_report_detail(report_id: UUID, user=Depends(get_current_user)):
     forecast_summary = {}
     ai_narration = {}
     observation_bytes = None
+    snapshot_data = None
+    weekly_narrative_summary = ""
+
+    # Prefer immutable snapshot captured at report-generation time.
+    try:
+        snapshot_path = f"users/{user_id}/report_snapshots/{report.get('id')}.json"
+        snapshot_bytes = supabase.storage.from_(settings.SUPABASE_STORAGE_BUCKET).download(snapshot_path)
+        if snapshot_bytes:
+            snapshot_data = json.loads(snapshot_bytes.decode("utf-8"))
+            observation_summary = snapshot_data.get("observation_summary") or {}
+            ai_narration = snapshot_data.get("ai_narration") or {}
+            maps = snapshot_data.get("maps") or []
+            forecast_summary = _build_forecast_summary_from_report_data(
+                snapshot_data.get("report_data") or {}
+            )
+            weekly_narrative_summary = _build_weekly_narrative_summary(
+                snapshot_data.get("report_data") or {},
+                ai_narration.get("weekly_summary_text", ""),
+            )
+            if ai_narration:
+                ai_narration["weekly_summary_text"] = weekly_narrative_summary or ai_narration.get("weekly_summary_text", "")
+    except Exception:
+        snapshot_data = None
 
     observation_file_id = report.get("observation_file_id")
     if observation_file_id:
@@ -180,14 +312,27 @@ async def get_report_detail(report_id: UUID, user=Depends(get_current_user)):
                 if file_path:
                     file_bytes = supabase.storage.from_(settings.SUPABASE_STORAGE_BUCKET).download(file_path)
                     observation_bytes = file_bytes
-                    observation_summary = summarize_observation_data(
-                        csv_bytes=file_bytes,
-                        requested_variables=["rainfall", "tmin", "tmax", "wind"],
-                    )
+                    if not snapshot_data:
+                        observation_summary = summarize_observation_data(
+                            csv_bytes=file_bytes,
+                            requested_variables=["rainfall", "tmin", "tmax", "wind"],
+                        )
         except Exception as e:
             print(f"Error fetching observation detail: {e}")
 
-    if observation and observation.get("report_week") and observation.get("report_year"):
+    if not observation and snapshot_data:
+        period = snapshot_data.get("period") or {}
+        observation = {
+            "id": str(snapshot_data.get("observation_file_id") or ""),
+            "file_name": "snapshot",
+            "status": "snapshot",
+            "report_week": period.get("week"),
+            "report_year": period.get("year"),
+            "report_start_at": period.get("start"),
+            "report_end_at": period.get("end"),
+        }
+
+    if (not maps) and observation and observation.get("report_week") and observation.get("report_year"):
         try:
             maps_response = supabase.table("generated_maps")\
                 .select("variable,map_url,created_at")\
@@ -217,88 +362,96 @@ async def get_report_detail(report_id: UUID, user=Depends(get_current_user)):
         pass
 
     # Open-Meteo forecast summary fallback for missing observation variables.
-    try:
-        # 1) Determine forecast period; fallback to generated_at-derived weekly window.
-        period_start = observation.get("report_start_at") if observation else None
-        period_end = observation.get("report_end_at") if observation else None
-        if not period_start or not period_end:
-            generated_at = report.get("generated_at")
-            if generated_at:
-                gen_dt = (
-                    datetime.fromisoformat(str(generated_at).replace("Z", "+00:00"))
-                    if isinstance(generated_at, str)
-                    else generated_at
-                )
-            else:
-                gen_dt = datetime.utcnow()
-            period_start = (gen_dt + timedelta(days=1)).date().isoformat()
-            period_end = (gen_dt + timedelta(days=7)).date().isoformat()
+    # Skip recomputation when an immutable snapshot exists.
+    if not snapshot_data:
+        try:
+            # 1) Determine forecast period; fallback to generated_at-derived weekly window.
+            period_start = observation.get("report_start_at") if observation else None
+            period_end = observation.get("report_end_at") if observation else None
+            if not period_start or not period_end:
+                generated_at = report.get("generated_at")
+                if generated_at:
+                    gen_dt = (
+                        datetime.fromisoformat(str(generated_at).replace("Z", "+00:00"))
+                        if isinstance(generated_at, str)
+                        else generated_at
+                    )
+                else:
+                    gen_dt = datetime.utcnow()
+                period_start = (gen_dt + timedelta(days=1)).date().isoformat()
+                period_end = (gen_dt + timedelta(days=7)).date().isoformat()
 
-        # 2) Determine centroid from station CSV; fallback to Kenya centroid.
-        centroid = _extract_centroid_from_observation_csv(observation_bytes) if observation_bytes else None
-        if not centroid:
-            # Conservative fallback so forecast-derived stats still compute.
-            centroid = {"lat": -0.0236, "lon": 37.9062}
+            # 2) Determine centroid from station CSV; fallback to Kenya centroid.
+            centroid = _extract_centroid_from_observation_csv(observation_bytes) if observation_bytes else None
+            if not centroid:
+                # Conservative fallback so forecast-derived stats still compute.
+                centroid = {"lat": -0.0236, "lon": 37.9062}
 
-        daily = fetch_daily_forecast(
-            latitude=centroid["lat"],
-            longitude=centroid["lon"],
-            report_start_at=str(period_start),
-            report_end_at=str(period_end),
-        )
+            daily = fetch_daily_forecast(
+                latitude=centroid["lat"],
+                longitude=centroid["lon"],
+                report_start_at=str(period_start),
+                report_end_at=str(period_end),
+            )
 
-        tmax = pd.to_numeric(pd.Series(daily.get("temperature_2m_max", [])), errors="coerce").dropna()
-        tmin = pd.to_numeric(pd.Series(daily.get("temperature_2m_min", [])), errors="coerce").dropna()
-        wind = pd.to_numeric(pd.Series(daily.get("wind_speed_10m_max", [])), errors="coerce").dropna()
-        gust = pd.to_numeric(pd.Series(daily.get("wind_gusts_10m_max", [])), errors="coerce").dropna()
-        rain = pd.to_numeric(pd.Series(daily.get("precipitation_sum", [])), errors="coerce").dropna()
+            tmax = pd.to_numeric(pd.Series(daily.get("temperature_2m_max", [])), errors="coerce").dropna()
+            tmin = pd.to_numeric(pd.Series(daily.get("temperature_2m_min", [])), errors="coerce").dropna()
+            wind = pd.to_numeric(pd.Series(daily.get("wind_speed_10m_max", [])), errors="coerce").dropna()
+            gust = pd.to_numeric(pd.Series(daily.get("wind_gusts_10m_max", [])), errors="coerce").dropna()
+            rain = pd.to_numeric(pd.Series(daily.get("precipitation_sum", [])), errors="coerce").dropna()
 
-        mean_temp = None
-        if not tmax.empty and not tmin.empty:
-            mean_temp = round(float(((tmax + tmin) / 2.0).mean()), 2)
-        elif not tmax.empty:
-            mean_temp = round(float(tmax.mean()), 2)
-        elif not tmin.empty:
-            mean_temp = round(float(tmin.mean()), 2)
+            mean_temp = None
+            if not tmax.empty and not tmin.empty:
+                mean_temp = round(float(((tmax + tmin) / 2.0).mean()), 2)
+            elif not tmax.empty:
+                mean_temp = round(float(tmax.mean()), 2)
+            elif not tmin.empty:
+                mean_temp = round(float(tmin.mean()), 2)
 
-        max_wind = None
-        if not wind.empty:
-            max_wind = round(float(wind.max()), 2)
-        elif not gust.empty:
-            max_wind = round(float(gust.max()), 2)
+            max_wind = None
+            if not wind.empty:
+                max_wind = round(float(wind.max()), 2)
+            elif not gust.empty:
+                max_wind = round(float(gust.max()), 2)
 
-        forecast_summary = {
-            "mean_temperature": mean_temp,
-            "max_wind_speed": max_wind,
-            "rainfall_sum": (round(float(rain.sum()), 2) if not rain.empty else None),
-        }
-    except Exception as e:
-        print(f"Error fetching Open-Meteo forecast summary: {e}")
+            forecast_summary = {
+                "mean_temperature": mean_temp,
+                "max_wind_speed": max_wind,
+                # Keep response key for compatibility, but value is average daily rainfall.
+                "rainfall_sum": (round(float(rain.mean()), 2) if not rain.empty else None),
+            }
+        except Exception as e:
+            print(f"Error fetching Open-Meteo forecast summary: {e}")
 
     # AI narration for dynamic county detail summary.
-    try:
-        wk = int(observation.get("report_week")) if observation and observation.get("report_week") is not None else 0
-        yr = int(observation.get("report_year")) if observation and observation.get("report_year") is not None else datetime.utcnow().year
-        report_start = observation.get("report_start_at") if observation else None
-        report_end = observation.get("report_end_at") if observation else None
+    if not snapshot_data:
+        try:
+            wk = int(observation.get("report_week")) if observation and observation.get("report_week") is not None else 0
+            yr = int(observation.get("report_year")) if observation and observation.get("report_year") is not None else datetime.utcnow().year
+            report_start = observation.get("report_start_at") if observation else None
+            report_end = observation.get("report_end_at") if observation else None
 
-        if report_start and report_end:
-            map_context = [
-                {"variable": m.get("variable", ""), "map_url": m.get("map_url", "")}
-                for m in maps
-            ]
-            ai_narration = await generate_report_narration(
-                county_name=county_name,
-                week_number=wk,
-                year=yr,
-                report_start_at=str(report_start),
-                report_end_at=str(report_end),
-                selected_variables=["rainfall", "tmin", "tmax", "wind"],
-                observation_summary=observation_summary or {},
-                map_context=map_context,
-            )
-    except Exception as e:
-        print(f"Error generating AI narration for report detail: {e}")
+            if report_start and report_end:
+                map_context = [
+                    {"variable": m.get("variable", ""), "map_url": m.get("map_url", "")}
+                    for m in maps
+                ]
+                ai_narration = await generate_report_narration(
+                    county_name=county_name,
+                    week_number=wk,
+                    year=yr,
+                    report_start_at=str(report_start),
+                    report_end_at=str(report_end),
+                    selected_variables=["rainfall", "tmin", "tmax", "wind"],
+                    observation_summary=observation_summary or {},
+                    map_context=map_context,
+                )
+                weekly_narrative_summary = _build_weekly_narrative_summary(
+                    {"sub_counties": []},
+                    ai_narration.get("weekly_summary_text", ""),
+                )
+        except Exception as e:
+            print(f"Error generating AI narration for report detail: {e}")
 
     try:
         ws_response = supabase.table("workflow_status")\
@@ -332,8 +485,10 @@ async def get_report_detail(report_id: UUID, user=Depends(get_current_user)):
         "observation_summary": observation_summary,
         "forecast_summary": forecast_summary,
         "ai_narration": ai_narration,
+        "weekly_narrative_summary": weekly_narrative_summary or ai_narration.get("weekly_summary_text", ""),
         "maps": maps,
         "workflow_logs": workflow_logs,
+        "snapshot_used": bool(snapshot_data),
     }
 
 

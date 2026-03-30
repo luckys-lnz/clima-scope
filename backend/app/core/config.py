@@ -111,6 +111,15 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str = Field(default="", env="ANTHROPIC_API_KEY")
     AI_PROVIDER: str = Field(default="openai", env="AI_PROVIDER")  # openai or anthropic
 
+    # Pesapal
+    PESAPAL_BASE_URL: str = Field(default="https://cybqa.pesapal.com/pesapalv3", env="PESAPAL_BASE_URL")
+    PESAPAL_CONSUMER_KEY: str = Field(default="", env="PESAPAL_CONSUMER_KEY")
+    PESAPAL_CONSUMER_SECRET: str = Field(default="", env="PESAPAL_CONSUMER_SECRET")
+    PESAPAL_CALLBACK_URL: str = Field(default="", env="PESAPAL_CALLBACK_URL")
+    PESAPAL_IPN_ID: str = Field(default="", env="PESAPAL_IPN_ID")
+    PESAPAL_IPN_SECRET: str = Field(default="", env="PESAPAL_IPN_SECRET")
+    PESAPAL_IPN_ALLOWED_IPS: str = Field(default="", env="PESAPAL_IPN_ALLOWED_IPS")
+
     # Station Data Auto Fetch (TAHMO/KMD)
     AUTO_STATION_FETCH_ENABLED: bool = Field(default=True, env="AUTO_STATION_FETCH_ENABLED")
     TAHMO_BASE_URL: str = Field(default="", env="TAHMO_BASE_URL")

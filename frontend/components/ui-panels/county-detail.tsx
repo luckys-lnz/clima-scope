@@ -13,7 +13,7 @@ interface CountyDetailProps {
   onBack: () => void
 }
 
-const COUNTY_DETAIL_CACHE_PREFIX = "county_detail_cache_v2"
+const COUNTY_DETAIL_CACHE_PREFIX = "county_detail_cache_v3"
 
 export function CountyDetail({ county, reportId, onBack }: CountyDetailProps) {
   const { access_token: token, isLoading: authLoading } = useAuth()
@@ -238,7 +238,7 @@ export function CountyDetail({ county, reportId, onBack }: CountyDetailProps) {
           <p className="text-3xl font-bold text-card-foreground">
             {typeof rainfallTotal === "number" ? `${rainfallTotal.toFixed(1)} mm` : "N/A"}
           </p>
-          <p className="text-xs text-muted-foreground mt-2">Station aggregate for selected period</p>
+          <p className="text-xs text-muted-foreground mt-2">Average daily rainfall across forecast days</p>
         </div>
 
         <div className="bg-card rounded-lg border border-border p-6">
@@ -267,7 +267,7 @@ export function CountyDetail({ county, reportId, onBack }: CountyDetailProps) {
       {/* Narrative Text */}
       <div className="bg-card rounded-lg border border-border p-6">
         <h2 className="font-bold text-lg text-card-foreground mb-4">Weekly Narrative Summary</h2>
-        <div className="prose prose-invert max-w-none">
+        <div className="prose prose-invert max-w-none pl-4 md:pl-6">
           {aiSummary ? (
             <p className="text-sm text-card-foreground leading-relaxed whitespace-pre-line">{aiSummary}</p>
           ) : (

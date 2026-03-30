@@ -98,7 +98,11 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
       )
 
       setValidationResult(result)
-      setAvailableVars(result.variables)
+      const rainfallOnly = result.variables.filter(
+        (v) => String(v).trim().toLowerCase() === "rainfall"
+      )
+      setAvailableVars(rainfallOnly)
+      setSelectedVars([])
       setStep(2)
 
       addLog(`✓ Files found: ${result.observation_file}, ${result.shapefile}`)

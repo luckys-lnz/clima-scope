@@ -132,6 +132,99 @@ def _fallback_narration(county_name: str, period_text: str) -> Dict[str, str]:
     }
 
 
+def _marine_condition_phrase(min_wind: float, max_wind: float) -> str:
+    if max_wind <= 7:
+        return "Calm to slight"
+    if max_wind <= 16:
+        return "Slight to moderate"
+    if max_wind <= 21:
+        return "Moderate"
+    # Keep key bulletin guidance aligned with the expected narrative style:
+    # e.g. 17-26 knots -> "Moderate to rough".
+    if min_wind >= 17 and max_wind <= 30:
+        return "Moderate to rough"
+    if min_wind >= 22 or max_wind >= 34:
+        return "Rough to very rough"
+    if min_wind >= 14 and max_wind >= 22:
+        return "Moderate to rough"
+    return "Slight to rough"
+
+
+def _build_marine_summary_from_daily_wind(marine_daily_wind: Optional[Dict[str, Any]]) -> Optional[str]:
+    if not isinstance(marine_daily_wind, dict) or not marine_daily_wind:
+        return None
+
+    values: List[float] = []
+    for raw in marine_daily_wind.values():
+        values += [float(x) for x in re.findall(r"\d+(?:\.\d+)?", str(raw))]
+
+    if not values:
+        return None
+
+    min_wind = min(values)
+    max_wind = max(values)
+    condition = _marine_condition_phrase(min_wind, max_wind)
+    return (
+        f"{condition} ocean conditions are expected this week with wind speeds "
+        f"ranging from {min_wind:.0f}-{max_wind:.0f} knots across Kenyan waters. "
+        "Marine users are advised to exercise caution."
+    )
+
+
+def _extract_marine_range(text: str) -> Optional[tuple[float, float]]:
+    if not text:
+        return None
+    match = re.search(r"(\d+(?:\.\d+)?)\s*(?:-|–|to)\s*(\d+(?:\.\d+)?)\s*knots?", text, flags=re.IGNORECASE)
+    if not match:
+        return None
+    start = float(match.group(1))
+    end = float(match.group(2))
+    return (min(start, end), max(start, end))
+
+
+def _marine_summary_needs_correction(
+    text: str,
+    marine_daily_wind: Optional[Dict[str, Any]],
+) -> bool:
+    if not text:
+        return True
+
+    values: List[float] = []
+    for raw in (marine_daily_wind or {}).values():
+        values += [float(x) for x in re.findall(r"\d+(?:\.\d+)?", str(raw))]
+    if not values:
+        return False
+
+    expected_min = round(min(values))
+    expected_max = round(max(values))
+    lowered = text.lower()
+
+    # Marine section must refer to Kenyan waters, not county-level context.
+    if "kenyan waters" not in lowered:
+        return True
+    if "county" in lowered:
+        return True
+
+    stated = _extract_marine_range(text)
+    if not stated:
+        return True
+    stated_min = round(stated[0])
+    stated_max = round(stated[1])
+    return stated_min != expected_min or stated_max != expected_max
+
+
+def _fallback_narration_with_marine(
+    county_name: str,
+    period_text: str,
+    marine_daily_wind: Optional[Dict[str, Any]],
+) -> Dict[str, str]:
+    fallback = _fallback_narration(county_name, period_text)
+    marine_summary = _build_marine_summary_from_daily_wind(marine_daily_wind)
+    if marine_summary:
+        fallback["marine_summary_text"] = marine_summary
+    return fallback
+
+
 def _extract_json(text: str) -> Dict[str, Any]:
     stripped = text.strip()
 
@@ -242,6 +335,7 @@ async def generate_report_narration(
     selected_variables: List[str],
     observation_summary: Dict[str, Any],
     map_context: List[Dict[str, str]],
+    marine_daily_wind: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, str]:
     period_text = f"{report_start_at} to {report_end_at}"
 
@@ -263,14 +357,20 @@ async def generate_report_narration(
         "selected_variables": selected_variables,
         "observation_summary": observation_summary,
         "generated_maps": map_context,
+        "marine_data": {
+            "daily_wind": marine_daily_wind or {},
+        },
         "requirements": {
             "weekly_summary_text": (
                 "120-220 words. Mention key tendencies for provided variables, "
                 "uncertainties when data missing, and practical impacts."
             ),
             "marine_summary_text": (
-                "40-90 words. If no marine data exists, state this clearly and "
-                "provide a cautious advisory sentence."
+                "40-90 words. Use marine_data.daily_wind values to summarize marine "
+                "conditions and quote the observed weekly wind-speed range in knots. "
+                "This section is for Kenyan waters (marine domain), not county-level wording. "
+                "If marine_data.daily_wind is empty, state this clearly and provide "
+                "a cautious advisory sentence."
             ),
         },
     }
@@ -285,14 +385,25 @@ async def generate_report_narration(
             narration = await _generate_openai_narration(system_prompt, user_prompt)
         else:
             logger.warning("ai_narration_no_provider_or_key_configured")
-            return _fallback_narration(county_name, period_text)
+            return _fallback_narration_with_marine(county_name, period_text, marine_daily_wind)
 
         if not narration.get("weekly_summary_text"):
             raise ValueError("Missing weekly_summary_text")
         if not narration.get("marine_summary_text"):
             raise ValueError("Missing marine_summary_text")
 
+        marine_summary = _build_marine_summary_from_daily_wind(marine_daily_wind)
+        if marine_summary:
+            marine_text = narration.get("marine_summary_text", "")
+            if (
+                not marine_text
+                or "no marine data" in marine_text.lower()
+                or "not currently synthesized" in marine_text.lower()
+                or _marine_summary_needs_correction(marine_text, marine_daily_wind)
+            ):
+                narration["marine_summary_text"] = marine_summary
+
         return narration
     except Exception as exc:
         logger.exception("ai_narration_generation_failed", extra={"error": str(exc)})
-        return _fallback_narration(county_name, period_text)
+        return _fallback_narration_with_marine(county_name, period_text, marine_daily_wind)
