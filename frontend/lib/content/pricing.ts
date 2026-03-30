@@ -28,6 +28,7 @@ export type PricingFaq = Readonly<{
 
 export const PRICING_PLANS = [
   {
+
     id: "pro",
     name: "Weather Reporting",
     description: "One plan with flexible monthly or yearly billing.",
@@ -38,9 +39,11 @@ export const PRICING_PLANS = [
     features: [
       { label: "All counties", included: true },
       { label: "Weekly + on-demand reports", included: true },
+
       { label: "Ward-level breakdowns", included: true },
       { label: "Automation scheduler", included: true },
-      { label: "Dedicated support + SLA", included: true },
+      { label: "Email distribution", included: true },
+      { label: "Audit logs", included: true },
     ],
   },
 ] as const satisfies ReadonlyArray<PricingPlan>
@@ -70,5 +73,6 @@ export const PRICING_FAQS = [
     question: "What's included in Enterprise support?",
     answer:
       "Enterprise includes onboarding, implementation guidance, and a dedicated support channel with an SLA.",
+
   },
 ] as const satisfies ReadonlyArray<PricingFaq>
