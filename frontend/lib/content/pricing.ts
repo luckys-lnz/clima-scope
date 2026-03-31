@@ -3,7 +3,7 @@ import type { Button } from "@/components/ui/button"
 
 type ButtonVariant = NonNullable<ComponentProps<typeof Button>["variant"]>
 
-export type PlanId = "starter" | "pro" | "enterprise"
+export type PlanId = "pro"
 
 export type PricingFeature = Readonly<{
   label: string
@@ -17,7 +17,7 @@ export type PricingPlan = Readonly<{
   monthly: number
   cta: string
   ctaVariant: ButtonVariant
-  isPopular?: boolean
+  isPopular: boolean
   features: ReadonlyArray<PricingFeature>
 }>
 
@@ -28,49 +28,22 @@ export type PricingFaq = Readonly<{
 
 export const PRICING_PLANS = [
   {
-    id: "starter",
-    name: "Starter",
-    description: "For small teams publishing weekly county summaries.",
-    monthly: 49,
-    cta: "Start Starter",
-    ctaVariant: "outline",
-    features: [
-      { label: "Up to 3 counties", included: true },
-      { label: "Weekly PDF reports", included: true },
-      { label: "Ward-level breakdowns", included: false },
-      { label: "Automation scheduler", included: false },
-      { label: "Priority support", included: false },
-    ],
-  },
-  {
+
     id: "pro",
-    name: "Pro",
-    description: "Best for regional teams scaling automated reporting.",
-    monthly: 99,
+    name: "Weather Reporting",
+    description: "One plan with flexible monthly or yearly billing.",
+    monthly: 1000,
     cta: "Go Pro",
     ctaVariant: "default",
-    isPopular: true,
+    isPopular: false,
     features: [
-      { label: "Up to 15 counties", included: true },
+      { label: "All counties", included: true },
       { label: "Weekly + on-demand reports", included: true },
+
       { label: "Ward-level breakdowns", included: true },
       { label: "Automation scheduler", included: true },
-      { label: "Priority support", included: false },
-    ],
-  },
-  {
-    id: "enterprise",
-    name: "Enterprise",
-    description: "For national coverage with custom workflows and SLAs.",
-    monthly: 199,
-    cta: "Talk to Sales",
-    ctaVariant: "secondary",
-    features: [
-      { label: "Unlimited counties", included: true },
-      { label: "Weekly + on-demand reports", included: true },
-      { label: "Ward-level breakdowns", included: true },
-      { label: "Automation scheduler", included: true },
-      { label: "Dedicated support + SLA", included: true },
+      { label: "Email distribution", included: true },
+      { label: "Audit logs", included: true },
     ],
   },
 ] as const satisfies ReadonlyArray<PricingPlan>
@@ -94,11 +67,12 @@ export const PRICING_FAQS = [
   {
     question: "Do you offer annual billing discounts?",
     answer:
-      "Yes. Annual billing includes a 20% discount across all plans.",
+      "Yes. Yearly billing is KES 10,000 instead of KES 12,000, which is a 16.67% discount.",
   },
   {
     question: "What's included in Enterprise support?",
     answer:
       "Enterprise includes onboarding, implementation guidance, and a dedicated support channel with an SLA.",
+
   },
 ] as const satisfies ReadonlyArray<PricingFaq>

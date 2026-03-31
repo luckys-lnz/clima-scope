@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 import pandas as pd
 import numpy as np
 import io
+import json
 import logging
 import os
 import tempfile
@@ -23,7 +24,7 @@ from app.schemas.workflow import (
     ReportGenerationResponse,
 )
 from app.core.config import settings
-from app.utils.map_generator import create_weather_map, create_reliable_rainfall_map
+from app.utils.map_generator import create_weather_map
 from app.utils.map_settings import DEFAULT_MAP_SETTINGS, sanitize_map_settings
 from app.utils.pdf_renderer import generate_weekly_forecast_pdf
 from app.services.narration_service import (
@@ -39,7 +40,11 @@ from app.services.station_data_service import (
     fetch_open_meteo_two_week_observations_csv,
     get_full_year_window_from_previous_day,
 )
-from app.services.weather_history_service import fetch_recent_station_weather_csv_bytes
+from app.services.weather_history_service import (
+    fetch_historical_weather_csv_bytes,
+    fetch_recent_station_weather_csv_bytes,
+)
+import re
 
 router = APIRouter(tags=["Workflow"])
 logger = logging.getLogger(__name__)
@@ -51,16 +56,72 @@ BACKGROUND_REPORT_TASKS: Dict[str, asyncio.Task] = {}
 
 def _resolve_column(columns, candidates):
     lowered = {str(col).strip().lower(): str(col) for col in columns}
+    normalized = {
+        re.sub(r"[^a-z0-9]+", "", str(col).strip().lower()): str(col)
+        for col in columns
+    }
     for candidate in candidates:
         key = candidate.lower()
         if key in lowered:
             return lowered[key]
+        norm_key = re.sub(r"[^a-z0-9]+", "", key)
+        if norm_key in normalized:
+            return normalized[norm_key]
     for candidate in candidates:
         key = candidate.lower()
+        norm_key = re.sub(r"[^a-z0-9]+", "", key)
         for lower_name, original in lowered.items():
             if key in lower_name:
                 return original
+            norm_name = re.sub(r"[^a-z0-9]+", "", lower_name)
+            if norm_key and norm_key in norm_name:
+                return original
     return None
+
+
+def _is_blank(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    return False
+
+
+def _get_personal_email(user: Any, profile: Dict[str, Any]) -> Optional[str]:
+    profile_email = profile.get("email")
+    if isinstance(profile_email, str) and profile_email.strip():
+        return profile_email.strip()
+
+    if hasattr(user, "email"):
+        user_email = getattr(user, "email")
+        if isinstance(user_email, str) and user_email.strip():
+            return user_email.strip()
+
+    if isinstance(user, dict):
+        user_email = user.get("email")
+        if isinstance(user_email, str) and user_email.strip():
+            return user_email.strip()
+
+    return None
+
+
+def _missing_required_profile_fields(user: Any, profile: Dict[str, Any]) -> List[str]:
+    personal_email = _get_personal_email(user, profile)
+    work_email = profile.get("signoff_email")
+
+    required_fields = [
+        ("Title", profile.get("prefix") or profile.get("title")),
+        ("Full Name", profile.get("full_name")),
+        ("Job Title", profile.get("job_title") or profile.get("title")),
+        ("Phone", profile.get("phone")),
+        ("County", profile.get("county")),
+        ("Personal Email", personal_email),
+        ("Work Email", work_email),
+        ("Station Name", profile.get("station_name")),
+        ("Station Address", profile.get("station_address")),
+    ]
+
+    return [label for label, value in required_fields if _is_blank(value)]
 
 
 def _format_wards_phrase(wards: List[str]) -> str:
@@ -579,8 +640,9 @@ def _load_observation_bytes_with_fallback(
     """
     Observation resolution strategy:
     1) Uploaded observation CSV for the selected week/year
-    2) Auto-fetch from TAHMO/KMD aggregated over 3 months ending previous-week day
-    3) Open-Meteo historical fallback if TAHMO/KMD are unavailable
+    2) Existing 1-year historical observations from daily_weather
+    3) Auto-fetch from TAHMO/KMD aggregated over the full-year window (fallback)
+    4) Open-Meteo historical fallback if TAHMO/KMD are unavailable
     """
     upload = (
         supabase.table("uploads")
@@ -604,6 +666,27 @@ def _load_observation_bytes_with_fallback(
             "source_type": "upload",
             "meta": {},
         }
+
+    window_start, window_end = get_full_year_window_from_previous_day(report_start_at)
+    try:
+        historical_bytes, historical_meta = fetch_historical_weather_csv_bytes(
+            county_identifier=county_name,
+            window_start=window_start,
+            window_end=window_end,
+            supabase_admin=supabase_admin,
+        )
+        if historical_bytes:
+            return {
+                "bytes": historical_bytes,
+                "observation_file_id": None,
+                "observation_label": (
+                    f"historical_daily_weather_{county_name}_{window_start}_to_{window_end}.csv"
+                ),
+                "source_type": "historical_daily_weather",
+                "meta": historical_meta,
+            }
+    except Exception as exc:
+        print(f"⚠️ Failed to load historical daily_weather baseline: {exc}")
 
     auto_bytes, meta = fetch_aggregated_station_csv_bytes(
         county_name=county_name,
@@ -1577,26 +1660,20 @@ async def generate_maps(
         print(f"{'=' * 50}")
 
         try:
-            # Rainfall map: station-observation interpolation with Open-Meteo blend
-            if variable == "rainfall":
-                image_bytes, filename = create_reliable_rainfall_map(
-                    county_name=request.county if request.county != "—" else "County",
-                    data_file=temp_csv,
-                    shapefile_path=local_shapefile_path,
-                    report_start_at=request.report_start_at,
-                    report_end_at=request.report_end_at,
-                    title_period_label=f"{request.report_start_at} to {request.report_end_at}",
-                    map_settings=map_settings,
-                )
-            else:
-                # Non-rainfall maps use legacy gridded workflow for now.
-                image_bytes, filename = create_weather_map(
-                    county_name=request.county if request.county != "—" else None,
-                    variable=col_name,
-                    data_file=temp_csv,
-                    shapefile_path=local_shapefile_path,
-                    map_settings=map_settings,
-                )
+            image_bytes, filename = create_weather_map(
+                county_name=(
+                    request.county
+                    if request.county != "—"
+                    else ("County" if variable == "rainfall" else None)
+                ),
+                variable=col_name,
+                data_file=temp_csv,
+                shapefile_path=local_shapefile_path,
+                map_settings=map_settings,
+                report_start_at=request.report_start_at,
+                report_end_at=request.report_end_at,
+                title_period_label=f"{request.report_start_at} to {request.report_end_at}",
+            )
 
             print(f"✅ Map generated: {filename} ({len(image_bytes)} bytes)")
 
@@ -1803,6 +1880,59 @@ async def generate_report(
         report_end_at=request.report_end_at,
     )
 
+    profile = {}
+    try:
+        add_stage(
+            "profile_validation",
+            "in_progress",
+            "Checking required profile details for report generation",
+        )
+        profile_response = (
+            supabase_admin.table("profiles")
+            .select("*")
+            .eq("id", user_id)
+            .limit(1)
+            .execute()
+        )
+        if profile_response.data:
+            profile = profile_response.data[0]
+    except Exception as e:
+        print(f"⚠️ Failed to fetch profile for report details validation: {e}")
+        add_stage(
+            "profile_validation",
+            "failed",
+            "Unable to verify profile details. Please try again.",
+            workflow_flags={"generated": False, "completed": False},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to verify profile details. Please try again.",
+        )
+
+    missing_fields = _missing_required_profile_fields(user, profile)
+    if missing_fields:
+        missing_fields_str = ", ".join(missing_fields)
+        add_stage(
+            "profile_validation",
+            "failed",
+            f"Missing profile details: {missing_fields_str}",
+            workflow_flags={"generated": False, "completed": False},
+        )
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Your profile is incomplete for report generation. "
+                "Please update your profile details on the Profile page. "
+                f"Missing fields: {missing_fields_str}."
+            ),
+        )
+
+    add_stage(
+        "profile_validation",
+        "completed",
+        "All required profile details are present",
+    )
+
     # ------------------------------------------------------------------
     # 1. Gather observation + map context for AI narration
     # ------------------------------------------------------------------
@@ -1950,6 +2080,31 @@ async def generate_report(
     # ------------------------------------------------------------------
     # 2. Generate AI narration from maps + observation summary
     # ------------------------------------------------------------------
+    report_dates_for_narration: List[str] = []
+    start_date_for_narration = datetime.fromisoformat(request.report_start_at).date()
+    end_date_for_narration = datetime.fromisoformat(request.report_end_at).date()
+    cursor_for_narration = start_date_for_narration
+    while cursor_for_narration <= end_date_for_narration:
+        report_dates_for_narration.append(cursor_for_narration.isoformat())
+        cursor_for_narration = cursor_for_narration.fromordinal(cursor_for_narration.toordinal() + 1)
+    if not report_dates_for_narration:
+        report_dates_for_narration = [request.report_start_at]
+
+    day_labels_for_narration = [
+        f"{datetime.fromisoformat(d).strftime('%A')}\n{datetime.fromisoformat(d).strftime('%d/%m/%Y')}"
+        for d in report_dates_for_narration
+    ]
+    county_rows_for_narration = _build_rows_from_daily(
+        open_meteo_daily or {},
+        report_dates_for_narration,
+        day_labels_for_narration,
+    )
+    marine_daily_wind_for_narration: Dict[str, Any] = {}
+    for idx, label in enumerate(day_labels_for_narration, start=1):
+        marine_daily_wind_for_narration[f"Day {idx}"] = (
+            county_rows_for_narration.get(label, {}).get("Winds", "N/A")
+        )
+
     add_stage(
         "ai_narration",
         "in_progress",
@@ -1965,6 +2120,7 @@ async def generate_report(
         selected_variables=request.variables,
         observation_summary=observation_summary,
         map_context=map_context,
+        marine_daily_wind=marine_daily_wind_for_narration,
     )
     narration_source = narration.get("source", "unknown")
     if narration_source == "fallback":
@@ -1985,21 +2141,18 @@ async def generate_report(
     # ------------------------------------------------------------------
     # 3. Build structured data payload for the PDF helper
     # ------------------------------------------------------------------
-    profile = {}
-    try:
-        profile_response = (
-            supabase_admin.table("profiles")
-            .select("*")
-            .eq("id", user_id)
-            .limit(1)
-            .execute()
-        )
-        if profile_response.data:
-            profile = profile_response.data[0]
-    except Exception as e:
-        print(f"⚠️ Failed to fetch profile for sign-off details: {e}")
-
-    signoff_name = profile.get("full_name") or "N/A"
+    signoff_raw_name = profile.get("full_name") or "N/A"
+    signoff_prefix = (profile.get("prefix") or "").strip()
+    if signoff_prefix and signoff_raw_name != "N/A":
+        normalized_name = signoff_raw_name.strip()
+        lower_prefix = signoff_prefix.lower().rstrip(".")
+        lower_name = normalized_name.lower()
+        if lower_name.startswith(f"{lower_prefix}. ") or lower_name.startswith(f"{lower_prefix} "):
+            signoff_name = normalized_name
+        else:
+            signoff_name = f"{signoff_prefix} {normalized_name}"
+    else:
+        signoff_name = signoff_raw_name
     county_for_title = profile.get("county") or request.county_name
     signoff_title = (
         profile.get("job_title")
@@ -2007,9 +2160,7 @@ async def generate_report(
         or f"County Director of Meteorological Services, {county_for_title} County."
     )
     signoff_mobile = profile.get("phone") or "N/A"
-    signoff_email = profile.get("email") or getattr(user, "email", None)
-    if not signoff_email and isinstance(user, dict):
-        signoff_email = user.get("email")
+    signoff_email = profile.get("signoff_email") or _get_personal_email(user, profile)
     if not signoff_email:
         signoff_email = "N/A"
 
@@ -2280,6 +2431,36 @@ async def generate_report(
 
         report_id = rows[0]["id"]
         pdf_url = f"/api/v1/reports/download/{report_id}"
+
+        # Persist immutable input/output snapshot for archive detail view fidelity.
+        try:
+            snapshot_payload = {
+                "report_id": str(report_id),
+                "user_id": str(user_id),
+                "generated_at": report_record["generated_at"],
+                "observation_file_id": (
+                    str(resolved_observation_file_id) if resolved_observation_file_id else None
+                ),
+                "observation_summary": observation_summary or {},
+                "ai_narration": narration or {},
+                "maps": map_context or [],
+                "report_data": data or {},
+                "period": {
+                    "start": request.report_start_at,
+                    "end": request.report_end_at,
+                    "week": request.week_number,
+                    "year": request.year,
+                },
+            }
+            snapshot_bytes = json.dumps(snapshot_payload, ensure_ascii=True).encode("utf-8")
+            snapshot_path = f"users/{user_id}/report_snapshots/{report_id}.json"
+            supabase_admin.storage.from_(BUCKET_NAME).upload(
+                path=snapshot_path,
+                file=snapshot_bytes,
+                file_options={"content-type": "application/json"},
+            )
+        except Exception as snapshot_exc:
+            print(f"⚠️ Failed to persist report snapshot JSON: {snapshot_exc}")
 
         print("✅ Report record created")
         add_stage(

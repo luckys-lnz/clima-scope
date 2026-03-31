@@ -222,6 +222,96 @@ def _format_range(values: list[float]) -> Optional[str]:
     return f"{min(values):.0f}–{max(values):.0f}"
 
 
+def _marine_condition_phrase(min_wind: float, max_wind: float) -> str:
+    if max_wind <= 7:
+        return "Calm to slight"
+    if max_wind <= 16:
+        return "Slight to moderate"
+    if max_wind <= 21:
+        return "Moderate"
+    # Keep key bulletin guidance aligned with the expected narrative style:
+    # e.g. 17-26 knots -> "Moderate to rough".
+    if min_wind >= 17 and max_wind <= 30:
+        return "Moderate to rough"
+    if min_wind >= 22 or max_wind >= 34:
+        return "Rough to very rough"
+    if min_wind >= 14 and max_wind >= 22:
+        return "Moderate to rough"
+    return "Slight to rough"
+
+
+def _build_marine_summary_from_winds(winds: list[str]) -> Optional[str]:
+    values: list[float] = []
+    for wind in winds:
+        values += _extract_numeric_values(str(wind))
+    if not values:
+        return None
+    min_wind = min(values)
+    max_wind = max(values)
+    condition = _marine_condition_phrase(min_wind, max_wind)
+    return (
+        f"{condition} ocean conditions are expected this week with wind speeds "
+        f"ranging from {min_wind:.0f}-{max_wind:.0f} knots across Kenyan waters. "
+        "Marine users are advised to exercise caution."
+    )
+
+
+def _extract_marine_range(text: str) -> Optional[tuple[float, float]]:
+    if not text:
+        return None
+    match = re.search(r"(\d+(?:\.\d+)?)\s*(?:-|–|to)\s*(\d+(?:\.\d+)?)\s*knots?", text, flags=re.IGNORECASE)
+    if not match:
+        return None
+    start = float(match.group(1))
+    end = float(match.group(2))
+    return (min(start, end), max(start, end))
+
+
+def _marine_summary_needs_correction(text: str, winds: list[str]) -> bool:
+    if not text:
+        return True
+
+    values: list[float] = []
+    for wind in winds:
+        values += _extract_numeric_values(str(wind))
+    if not values:
+        return False
+
+    expected_min = round(min(values))
+    expected_max = round(max(values))
+    lowered = text.lower()
+
+    # Marine section must reference Kenyan waters, not county-level context.
+    if "kenyan waters" not in lowered:
+        return True
+    if "county" in lowered:
+        return True
+
+    stated = _extract_marine_range(text)
+    if not stated:
+        return True
+    stated_min = round(stated[0])
+    stated_max = round(stated[1])
+    return stated_min != expected_min or stated_max != expected_max
+
+
+def _select_marine_summary_text(narration_text: str, winds: list[str]) -> str:
+    clean = (narration_text or "").strip()
+    generated = _build_marine_summary_from_winds(winds)
+    if not clean:
+        return generated or ""
+
+    lowered = clean.lower()
+    if generated and (
+        "no marine data" in lowered
+        or "not currently synthesized" in lowered
+        or "no marine weather data" in lowered
+        or _marine_summary_needs_correction(clean, winds)
+    ):
+        return generated
+    return clean
+
+
 def _summarize_morning_conditions(rows: list[dict]) -> str:
     if not rows:
         return "cloudy mornings with sunny intervals"
@@ -359,7 +449,8 @@ def generate_weekly_forecast_pdf(data, narration, map_path, output_path, signoff
     def _paragraph_height(text: str, style: ParagraphStyle, width: float) -> float:
         para = Paragraph(text, style)
         _, height = para.wrap(width, 10_000)
-        return float(height)
+        # Include paragraph spacing so cover height accounting matches ReportLab layout.
+        return float(height) + float(getattr(style, "spaceBefore", 0.0)) + float(getattr(style, "spaceAfter", 0.0))
 
     section_style = ParagraphStyle(
         name="SectionHeader",
@@ -372,6 +463,11 @@ def generate_weekly_forecast_pdf(data, narration, map_path, output_path, signoff
 
     normal_style = styles["Normal"]
     bold_style = section_style
+    signoff_style = ParagraphStyle(
+        name="SignoffStyle",
+        parent=bold_style,
+        fontSize=normal_style.fontSize,
+    )
     summary_style = ParagraphStyle(
         name="WeeklySummary",
         parent=styles["Normal"],
@@ -472,17 +568,17 @@ def generate_weekly_forecast_pdf(data, narration, map_path, output_path, signoff
     used_cover_height += 6.0
 
     if map_path:
-        elements.append(Spacer(1, 10))
-        used_cover_height += 10.0
+        elements.append(Spacer(1, 2))
+        used_cover_height += 2.0
         map_img = Image(map_path)
-        # Use as much cover area as possible without colliding with surrounding content.
+        # Keep map on the cover page by strictly capping to remaining frame height.
         map_box_width = doc.width
-        map_box_height = max(140.0, doc.height - used_cover_height - 8.0)
+        map_box_height = max(1.0, doc.height - used_cover_height - 8.0)
         map_img = _scale_image_to_fit(map_img, map_box_width, map_box_height)
 
         map_img.hAlign = "CENTER"
         elements.append(map_img)
-        elements.append(Spacer(1, 8))
+        elements.append(Spacer(1, 1))
 
     elements.append(PageBreak())
 
@@ -622,21 +718,6 @@ def generate_weekly_forecast_pdf(data, narration, map_path, output_path, signoff
     elements.append(Paragraph("PART II: 7 Days Marine Weather", bold_style))
     elements.append(Spacer(1, 12))
 
-    elements.append(Paragraph(_sanitize_text(narration["marine_summary_text"]), normal_style))
-    elements.append(Spacer(1, 12))
-
-
-    # =========================
-    # Table I
-    # =========================
-
-    elements.append(Paragraph(
-        "Table I: Ocean wave height and wind speed for Kenyan waters.",
-        subcounty_title_style
-    ))
-    elements.append(Spacer(1, 10))
-
-
     marine_csv_path = os.path.join(os.path.dirname(output_path), "marine_wind.csv")
     marine_aggregate = _aggregate_marine_wind_from_subcounties(data)
     marine_payload = {"daily_wind": marine_aggregate} if marine_aggregate else data.get("marine", {})
@@ -647,6 +728,22 @@ def generate_weekly_forecast_pdf(data, narration, map_path, output_path, signoff
         source = marine_aggregate or data.get("marine", {}).get("daily_wind", {})
         days = list(source.keys())
         winds = [_extract_wind_range(str(v)) for v in source.values()]
+
+    marine_summary_text = _select_marine_summary_text(
+        narration.get("marine_summary_text", ""),
+        winds,
+    )
+    elements.append(Paragraph(_sanitize_text(marine_summary_text), normal_style))
+    elements.append(Spacer(1, 12))
+
+    # =========================
+    # Table I
+    # =========================
+    elements.append(Paragraph(
+        "Table I: Ocean wave height and wind speed for Kenyan waters.",
+        subcounty_title_style
+    ))
+    elements.append(Spacer(1, 10))
 
     marine_table_data = [
         ["DAYS"] + days,
@@ -887,10 +984,10 @@ def generate_weekly_forecast_pdf(data, narration, map_path, output_path, signoff
 
     elements.append(Spacer(1, 12))
 
-    elements.append(Paragraph(f"<b>{signoff_name}</b>", bold_style))
-    elements.append(Paragraph(signoff_title, bold_style))
-    elements.append(Paragraph(f"Mobile: {signoff_mobile}", bold_style))
-    elements.append(Paragraph(f'<font color="blue"><u>Email: {signoff_email}</u></font>', bold_style))
+    elements.append(Paragraph(f"<b>{signoff_name}</b>", signoff_style))
+    elements.append(Paragraph(signoff_title, signoff_style))
+    elements.append(Paragraph(f"Mobile: {signoff_mobile}", signoff_style))
+    elements.append(Paragraph(f'<font color="blue"><u>Email: {signoff_email}</u></font>', signoff_style))
 
     # =========================
     # BUILD DOCUMENT

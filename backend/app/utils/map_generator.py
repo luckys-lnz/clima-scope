@@ -10,13 +10,16 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
+from matplotlib.patches import PathPatch
 from matplotlib.colors import ListedColormap, BoundaryNorm
-from matplotlib.lines import Line2D
+from matplotlib.path import Path as MplPath
 import io
 from pathlib import Path
 from datetime import datetime, timedelta
 from datetime import date as date_cls
 import logging
+from functools import lru_cache
+import hashlib
 import httpx
 from shapely.geometry import Point
 from typing import Optional
@@ -93,9 +96,17 @@ def create_weather_map(
     data_file='kenya_3km_weather.csv',
     shapefile_path='Kenya_county_assemblies_CLEANED.shp',  # ← DYNAMIC PATH!
     map_settings: Optional[MapSettings] = None,
+    report_start_at: Optional[str] = None,
+    report_end_at: Optional[str] = None,
+    title_period_label=None,
+    output_png_path: Optional[str] = None,
+    return_figure: bool = False,
 ):
     """
-    Create weather map for specified variable and return as bytes
+    Unified map entrypoint.
+    - Rainfall uses the reliable production pipeline (Open-Meteo coarse fetch,
+      offline bilinear downscale, terrain adjustment, IDW station correction).
+    - Tmin/Tmax use the existing gridded rendering path.
     
     Args:
         county_name: Name of county (None for all Kenya)
@@ -107,6 +118,21 @@ def create_weather_map(
     Returns:
         Tuple of (image_bytes, filename)
     """
+    if str(variable).strip().lower() in {"rain", "rainfall", "precipitation", "precip"}:
+        if not report_start_at or not report_end_at:
+            raise ValueError("Rainfall map requires report_start_at and report_end_at.")
+        return _create_reliable_rainfall_map(
+            county_name=county_name if county_name else "County",
+            data_file=data_file,
+            shapefile_path=shapefile_path,
+            report_start_at=report_start_at,
+            report_end_at=report_end_at,
+            title_period_label=title_period_label,
+            map_settings=map_settings,
+            output_png_path=output_png_path,
+            return_figure=return_figure,
+        )
+
     print("=" * 70)
     print(f"KENYA {variable.upper()} MAP - CALIBRATED VERSION")
     print("=" * 70)
@@ -392,41 +418,263 @@ def _extract_station_frame(df: pd.DataFrame) -> pd.DataFrame:
     return stations
 
 
-def _idw_interpolate(
+def _ordinary_kriging_interpolate(
     stations: pd.DataFrame,
     grid_x: np.ndarray,
     grid_y: np.ndarray,
-    power: float = 3.0,
-    k_nearest: int = 5,
+    value_column: str,
+    variogram_model: str = "exponential",
+    auto_variogram_fit: bool = True,
+    nlags: int = 10,
 ) -> np.ndarray:
-    station_lon = stations["lon"].to_numpy()
-    station_lat = stations["lat"].to_numpy()
-    station_values = stations["blended_rainfall"].to_numpy()
+    try:
+        from pykrige.ok import OrdinaryKriging
+    except ImportError as exc:
+        raise ImportError(
+            "Ordinary Kriging requires 'pykrige'. Install it with: pip install pykrige"
+        ) from exc
 
-    station_count = len(station_values)
-    if station_count == 0:
+    if stations.empty:
         return np.full_like(grid_x, np.nan, dtype=float)
 
-    k = max(1, min(int(k_nearest), station_count))
-    power = max(1.0, float(power))
+    # De-duplicate station coordinates so kriging matrix remains well-conditioned.
+    station_frame = stations[["lon", "lat", value_column]].copy()
+    station_frame[value_column] = pd.to_numeric(station_frame[value_column], errors="coerce")
+    station_frame = station_frame.dropna(subset=["lon", "lat", value_column])
+    if station_frame.empty:
+        return np.full_like(grid_x, np.nan, dtype=float)
+    station_frame = (
+        station_frame.groupby(["lon", "lat"], as_index=False)[value_column]
+        .mean()
+        .reset_index(drop=True)
+    )
 
-    interpolated = np.zeros_like(grid_x, dtype=float)
-    for i in range(grid_x.shape[0]):
-        gx = grid_x[i, :]
-        gy = grid_y[i, :]
-        dx = gx[:, None] - station_lon[None, :]
-        dy = gy[:, None] - station_lat[None, :]
-        dist2 = dx * dx + dy * dy
+    station_lon = station_frame["lon"].to_numpy(dtype=float)
+    station_lat = station_frame["lat"].to_numpy(dtype=float)
+    station_values = station_frame[value_column].to_numpy(dtype=float)
+    if station_values.size < 2:
+        return np.full_like(grid_x, float(station_values[0]) if station_values.size == 1 else np.nan, dtype=float)
 
-        # Use only nearest stations to reduce over-smoothing and preserve local contrasts.
-        nearest_idx = np.argpartition(dist2, kth=k - 1, axis=1)[:, :k]
-        nearest_dist2 = np.take_along_axis(dist2, nearest_idx, axis=1)
-        nearest_vals = station_values[nearest_idx]
+    variogram_model = str(variogram_model).strip().lower()
+    if variogram_model not in {"gaussian", "spherical", "exponential"}:
+        variogram_model = "spherical"
 
-        nearest_dist2 = np.where(nearest_dist2 < 1e-12, 1e-12, nearest_dist2)
-        weights = 1.0 / np.power(nearest_dist2, power / 2.0)
-        interpolated[i, :] = (weights * nearest_vals).sum(axis=1) / weights.sum(axis=1)
-    return interpolated
+    kriging_kwargs = {
+        "variogram_model": variogram_model,
+        "nlags": max(6, int(nlags)),
+        "verbose": False,
+        "enable_plotting": False,
+        "coordinates_type": "euclidean",
+    }
+    if not auto_variogram_fit:
+        # Light-touch defaults; pykrige auto-fit remains the preferred option.
+        value_std = max(float(np.nanstd(station_values)), 1e-6)
+        kriging_kwargs["variogram_parameters"] = {"sill": value_std**2, "nugget": 0.0}
+
+    try:
+        ok = OrdinaryKriging(
+            station_lon,
+            station_lat,
+            station_values,
+            exact_values=True,
+            **kriging_kwargs,
+        )
+    except TypeError:
+        ok = OrdinaryKriging(station_lon, station_lat, station_values, **kriging_kwargs)
+
+    grid_lon = grid_x[0, :]
+    grid_lat = grid_y[:, 0]
+    z_kriged, _ = ok.execute("grid", grid_lon, grid_lat)
+    surface = np.asarray(z_kriged, dtype=float)
+
+    # Enforce exact observed values on nearest grid nodes for visibly faithful station anchors.
+    for lon, lat, val in zip(station_lon, station_lat, station_values):
+        gx_idx = int(np.argmin(np.abs(grid_lon - lon)))
+        gy_idx = int(np.argmin(np.abs(grid_lat - lat)))
+        surface[gy_idx, gx_idx] = float(val)
+
+    return surface
+
+
+def _choose_variogram_model(
+    requested_model: str,
+    bounds,
+    station_count: int,
+    rainfall_values: np.ndarray,
+) -> str:
+    model = str(requested_model or "").strip().lower()
+    valid = {"gaussian", "spherical", "exponential"}
+    if model in valid:
+        return model
+
+    # Quick county-aware heuristic for spatial patch structure.
+    # - sparse/large extents: exponential (more local, patchy behavior)
+    # - dense stations on small/medium extents: gaussian (smoother transitions)
+    # - otherwise: spherical (balanced default)
+    _, _, _, _, area_km2 = calculate_map_dimensions(bounds)
+    max_dim_km = max(width_km, height_km)
+    station_density = station_count / max(area_km2, 1.0)
+    cv = float(np.nanstd(rainfall_values) / max(np.nanmean(rainfall_values), 1e-6))
+
+    if station_count <= 7 or area_km2 > 42000 or max_dim_km > 280 or station_density < 0.00022:
+        return "exponential"
+    if station_count >= 18 and area_km2 < 22000 and cv < 0.55:
+        return "gaussian"
+    return "spherical"
+
+
+def _select_grid_axis_size(bounds) -> int:
+    _, _, width_km, height_km, area_km2 = calculate_map_dimensions(bounds)
+    max_dim_km = max(width_km, height_km)
+
+    if area_km2 < 15000 and max_dim_km < 180:
+        return 280  # Small county
+    if area_km2 < 45000 and max_dim_km < 320:
+        return 230  # Medium county
+    return 180  # Large region
+
+
+def _build_regular_grid(bounds):
+    lon_min, lat_min, lon_max, lat_max = bounds
+    width = max(lon_max - lon_min, 1e-9)
+    height = max(lat_max - lat_min, 1e-9)
+    axis_cells = _select_grid_axis_size(bounds)
+    margin = max(width, height) * 0.04
+
+    lon_lin = np.linspace(lon_min - margin, lon_max + margin, axis_cells)
+    lat_lin = np.linspace(lat_min - margin, lat_max + margin, axis_cells)
+    return np.meshgrid(lon_lin, lat_lin), margin
+
+
+def _build_target_grid(bounds, target_km: float = 1.5):
+    """
+    Build a near 1-2 km target grid for high-resolution rainfall mapping.
+    """
+    lon_min, lat_min, lon_max, lat_max = bounds
+    width = max(lon_max - lon_min, 1e-9)
+    height = max(lat_max - lat_min, 1e-9)
+    margin = max(width, height) * 0.04
+
+    mid_lat = (lat_min + lat_max) / 2.0
+    km_per_deg_lat = 111.0
+    km_per_deg_lon = max(111.0 * np.cos(np.radians(mid_lat)), 1e-6)
+    target_deg_lat = max(target_km / km_per_deg_lat, 1e-6)
+    target_deg_lon = max(target_km / km_per_deg_lon, 1e-6)
+
+    lat_count = int(np.ceil((height + (2 * margin)) / target_deg_lat)) + 1
+    lon_count = int(np.ceil((width + (2 * margin)) / target_deg_lon)) + 1
+    lat_count = int(np.clip(lat_count, 140, 420))
+    lon_count = int(np.clip(lon_count, 140, 420))
+
+    lon_lin = np.linspace(lon_min - margin, lon_max + margin, lon_count)
+    lat_lin = np.linspace(lat_min - margin, lat_max + margin, lat_count)
+    return np.meshgrid(lon_lin, lat_lin), margin
+
+
+def _mask_to_polygon(grid_x, grid_y, polygon):
+    try:
+        from shapely import contains_xy
+
+        return contains_xy(polygon, grid_x, grid_y)
+    except Exception:
+        try:
+            import shapely.vectorized as vectorized
+
+            return vectorized.contains(polygon, grid_x, grid_y)
+        except Exception:
+            return np.array(
+                [polygon.contains(Point(x, y)) for x, y in zip(grid_x.ravel(), grid_y.ravel())]
+            ).reshape(grid_x.shape)
+
+
+def _ring_to_path_segments(coords):
+    verts = []
+    codes = []
+    if len(coords) < 3:
+        return verts, codes
+    points = np.asarray(coords, dtype=float)
+    verts.append((points[0, 0], points[0, 1]))
+    codes.append(MplPath.MOVETO)
+    for p in points[1:]:
+        verts.append((p[0], p[1]))
+        codes.append(MplPath.LINETO)
+    verts.append((points[0, 0], points[0, 1]))
+    codes.append(MplPath.CLOSEPOLY)
+    return verts, codes
+
+
+def _geometry_to_clip_patch(geometry, ax):
+    if geometry is None or geometry.is_empty:
+        return None
+
+    polygons = []
+    if geometry.geom_type == "Polygon":
+        polygons = [geometry]
+    elif geometry.geom_type == "MultiPolygon":
+        polygons = list(geometry.geoms)
+    else:
+        try:
+            polygons = [g for g in geometry.geoms if g.geom_type in {"Polygon", "MultiPolygon"}]
+        except Exception:
+            polygons = []
+
+    verts_all = []
+    codes_all = []
+    for poly in polygons:
+        if poly.geom_type == "MultiPolygon":
+            poly_iter = list(poly.geoms)
+        else:
+            poly_iter = [poly]
+        for p in poly_iter:
+            ext_verts, ext_codes = _ring_to_path_segments(p.exterior.coords)
+            verts_all.extend(ext_verts)
+            codes_all.extend(ext_codes)
+            for ring in p.interiors:
+                int_verts, int_codes = _ring_to_path_segments(ring.coords)
+                verts_all.extend(int_verts)
+                codes_all.extend(int_codes)
+
+    if not verts_all:
+        return None
+
+    path = MplPath(verts_all, codes_all)
+    return PathPatch(path, transform=ax.transData, facecolor="none", edgecolor="none")
+
+
+def _determine_contour_levels(min_val: float, max_val: float) -> np.ndarray:
+    if not np.isfinite(min_val) or not np.isfinite(max_val):
+        return np.array([0.0, 10.0, 20.0, 30.0], dtype=float)
+
+    if np.isclose(min_val, max_val):
+        base = round(min_val / 10.0) * 10.0
+        return np.array([base - 10, base, base + 10, base + 20], dtype=float)
+
+    span = max_val - min_val
+    target_step = span / 9.0
+    candidates = np.array([10, 15, 20, 25, 30, 40, 50], dtype=float)
+    step = candidates[np.argmin(np.abs(candidates - target_step))]
+    step = max(10.0, min(50.0, float(step)))
+
+    level_start = np.floor(min_val / step) * step
+    level_end = np.ceil(max_val / step) * step
+    levels = np.arange(level_start, level_end + step, step)
+    if levels.size < 4:
+        levels = np.array([min_val, min_val + step, min_val + (2 * step), min_val + (3 * step)], dtype=float)
+    return levels
+
+
+def _calculate_scale_km(bounds):
+    lon_min, lat_min, lon_max, lat_max = bounds
+    mid_lat = (lat_min + lat_max) / 2.0
+    km_per_deg_lon = 111.32 * np.cos(np.radians(mid_lat))
+    if km_per_deg_lon <= 0:
+        return 20
+
+    width_km = (lon_max - lon_min) * km_per_deg_lon
+    # Use a "nice" total length near 25% of map width for a properly scaled graphic bar.
+    target_km = max(width_km * 0.25, 5.0)
+    nice_lengths = [5, 10, 20, 25, 50, 75, 100, 150, 200]
+    return min(nice_lengths, key=lambda n: abs(n - target_km))
 
 
 def _add_scale_bar(ax, bounds):
@@ -436,11 +684,7 @@ def _add_scale_bar(ax, bounds):
     if km_per_deg_lon <= 0:
         return
 
-    width_km = (lon_max - lon_min) * km_per_deg_lon
-    # Use a "nice" total length near 25% of map width for a properly scaled graphic bar.
-    target_km = max(width_km * 0.25, 5.0)
-    nice_lengths = [5, 10, 20, 25, 50, 75, 100, 150, 200]
-    scale_km = min(nice_lengths, key=lambda n: abs(n - target_km))
+    scale_km = _calculate_scale_km(bounds)
     scale_deg = scale_km / km_per_deg_lon
     segment_km = scale_km / 4.0
     segment_deg = scale_deg / 4.0
@@ -474,6 +718,40 @@ def _add_scale_bar(ax, bounds):
     ax.text(x0 + 4 * segment_deg, label_y, f"{int(scale_km)} km", ha="center", va="top", fontsize=8, zorder=10)
 
 
+def _add_scale_bar_panel(fig, bounds, panel_bounds):
+    panel_left, panel_bottom, panel_width, panel_height = panel_bounds
+    scale_ax = fig.add_axes([panel_left, panel_bottom, panel_width, panel_height], zorder=25)
+    scale_ax.set_xlim(0, 1)
+    scale_ax.set_ylim(0, 1)
+    scale_ax.axis("off")
+
+    scale_km = _calculate_scale_km(bounds)
+    segment_w = 0.19
+    x0 = 0.12
+    y0 = 0.44
+    bar_h = 0.26
+
+    for idx in range(4):
+        x = x0 + (idx * segment_w)
+        face = "black" if idx % 2 == 0 else "white"
+        scale_ax.add_patch(
+            Rectangle(
+                (x, y0),
+                segment_w,
+                bar_h,
+                facecolor=face,
+                edgecolor="black",
+                linewidth=0.9,
+            )
+        )
+
+    segment_km = scale_km / 4.0
+    label_y = y0 - 0.10
+    scale_ax.text(x0, label_y, "0", ha="center", va="top", fontsize=8.5)
+    scale_ax.text(x0 + (2 * segment_w), label_y, f"{int(2 * segment_km)}", ha="center", va="top", fontsize=8.5)
+    scale_ax.text(x0 + (4 * segment_w), label_y, f"{int(scale_km)} km", ha="center", va="top", fontsize=8.5)
+
+
 def _add_north_arrow(ax, bounds):
     lon_min, lat_min, lon_max, lat_max = bounds
     x = lon_max - (lon_max - lon_min) * 0.06
@@ -493,12 +771,12 @@ def _add_north_arrow(ax, bounds):
 
 def _add_compass_rose(fig, container_bounds):
     container_left, container_bottom, container_width, container_height = container_bounds
-    compass_size = min(container_width, container_height) * 0.12
-    compass_left = container_left + 0.012
-    compass_bottom = container_bottom + container_height - compass_size - 0.012
+    compass_size = min(container_width, container_height) * 0.11
+    compass_left = container_left + container_width - compass_size - 0.014
+    compass_bottom = container_bottom + container_height - compass_size - 0.014
     compass_path = Path(__file__).resolve().parents[2] / "scripts" / "assets" / "compass.png"
 
-    # Place compass at the container top-left corner outside the map panel.
+    # Place compass at the container top-right corner outside the map panel.
     if compass_path.exists():
         try:
             compass_img = plt.imread(str(compass_path))
@@ -544,7 +822,511 @@ def _fetch_open_meteo_station_rainfall(lat, lon, report_start_at, report_end_at)
     return float(numeric.sum())
 
 
-def create_reliable_rainfall_map(
+def _sum_precip_from_payload(payload: dict) -> float:
+    daily = payload.get("daily", {}) if isinstance(payload, dict) else {}
+    values = daily.get("precipitation_sum", [])
+    numeric = pd.to_numeric(pd.Series(values), errors="coerce").dropna()
+    if numeric.empty:
+        return np.nan
+    return float(numeric.sum())
+
+
+@lru_cache(maxsize=512)
+def _fetch_open_meteo_coarse_batch(lat_csv: str, lon_csv: str, report_start_at: str, report_end_at: str):
+    params = {
+        "latitude": lat_csv,
+        "longitude": lon_csv,
+        "daily": "precipitation_sum",
+        "start_date": report_start_at,
+        "end_date": report_end_at,
+        "timezone": "Africa/Nairobi",
+    }
+    response = httpx.get("https://api.open-meteo.com/v1/forecast", params=params, timeout=30.0)
+    response.raise_for_status()
+    payload = response.json()
+    return payload
+
+
+@lru_cache(maxsize=8000)
+def _fetch_open_meteo_point_rain_elev(lat_r: float, lon_r: float, report_start_at: str, report_end_at: str):
+    params = {
+        "latitude": float(lat_r),
+        "longitude": float(lon_r),
+        "daily": "precipitation_sum",
+        "start_date": report_start_at,
+        "end_date": report_end_at,
+        "timezone": "Africa/Nairobi",
+    }
+    response = httpx.get("https://api.open-meteo.com/v1/forecast", params=params, timeout=20.0)
+    response.raise_for_status()
+    payload = response.json()
+    rain = _sum_precip_from_payload(payload if isinstance(payload, dict) else {})
+    elev = np.nan
+    if isinstance(payload, dict):
+        try:
+            elev = float(payload.get("elevation", np.nan))
+        except Exception:
+            elev = np.nan
+    return rain, elev
+
+
+def _fetch_open_meteo_coarse_grid_once(lon_vals: np.ndarray, lat_vals: np.ndarray, report_start_at: str, report_end_at: str):
+    gx, gy = np.meshgrid(lon_vals, lat_vals)
+    flat_lat = gy.ravel()
+    flat_lon = gx.ravel()
+    # Rounded coordinates keep request/cache key stable.
+    lat_csv = ",".join(f"{v:.4f}" for v in flat_lat)
+    lon_csv = ",".join(f"{v:.4f}" for v in flat_lon)
+
+    payload = _fetch_open_meteo_coarse_batch(lat_csv, lon_csv, report_start_at, report_end_at)
+    point_count = flat_lat.size
+    rain_flat = np.full(point_count, np.nan, dtype=float)
+    elev_flat = np.full(point_count, np.nan, dtype=float)
+
+    entries = None
+    if isinstance(payload, list):
+        entries = payload
+    elif isinstance(payload, dict):
+        if isinstance(payload.get("responses"), list):
+            entries = payload.get("responses")
+        elif "daily" in payload:
+            entries = [payload]
+
+    valid_batch = bool(entries) and len(entries) >= point_count
+    if valid_batch:
+        for i in range(point_count):
+            entry = entries[i] if isinstance(entries[i], dict) else {}
+            rain_flat[i] = _sum_precip_from_payload(entry)
+            try:
+                elev_flat[i] = float(entry.get("elevation", np.nan))
+            except Exception:
+                elev_flat[i] = np.nan
+    else:
+        # Reliable fallback: per-point fetch with cache.
+        for i, (lat, lon) in enumerate(zip(flat_lat, flat_lon)):
+            lat_r = round(float(lat), 4)
+            lon_r = round(float(lon), 4)
+            try:
+                rain, elev = _fetch_open_meteo_point_rain_elev(lat_r, lon_r, report_start_at, report_end_at)
+                rain_flat[i] = rain
+                elev_flat[i] = elev
+            except Exception as exc:
+                logger.warning(
+                    "open_meteo_point_fetch_failed",
+                    extra={"lat": lat_r, "lon": lon_r, "error": str(exc)},
+                )
+
+    return rain_flat.reshape(gx.shape), elev_flat.reshape(gx.shape)
+
+
+def _build_coarse_grid(bounds, coarse_km: float = 10.0, max_points: int = 81):
+    lon_min, lat_min, lon_max, lat_max = bounds
+    mid_lat = (lat_min + lat_max) / 2.0
+    km_per_deg_lat = 111.0
+    km_per_deg_lon = max(111.0 * np.cos(np.radians(mid_lat)), 1e-6)
+    step_km = max(float(coarse_km), 6.0)
+
+    while True:
+        dlat = max(step_km / km_per_deg_lat, 1e-5)
+        dlon = max(step_km / km_per_deg_lon, 1e-5)
+        lat_vals = np.arange(lat_min, lat_max + dlat, dlat)
+        lon_vals = np.arange(lon_min, lon_max + dlon, dlon)
+        if lat_vals.size < 2:
+            lat_vals = np.array([lat_min, lat_max], dtype=float)
+        if lon_vals.size < 2:
+            lon_vals = np.array([lon_min, lon_max], dtype=float)
+
+        if (lat_vals.size * lon_vals.size) <= max_points or step_km >= 45.0:
+            return lon_vals.astype(float), lat_vals.astype(float)
+        step_km += 2.5
+
+
+def _fill_nan_with_mean(grid):
+    filled = np.asarray(grid, dtype=float).copy()
+    if np.isnan(filled).all():
+        return np.zeros_like(filled, dtype=float)
+    mean_val = float(np.nanmean(filled))
+    return np.where(np.isfinite(filled), filled, mean_val)
+
+
+def _bilinear_resample_regular_grid(src_lon, src_lat, src_values, target_x, target_y):
+    """
+    Bilinear interpolation from a regular source grid to target_x/target_y.
+    """
+    values = _fill_nan_with_mean(src_values)
+    nx = len(src_lon)
+    ny = len(src_lat)
+    if nx < 2 or ny < 2:
+        return np.full_like(target_x, float(np.nanmean(values)), dtype=float)
+
+    xi = np.interp(target_x.ravel(), src_lon, np.arange(nx, dtype=float))
+    yi = np.interp(target_y.ravel(), src_lat, np.arange(ny, dtype=float))
+    x0 = np.floor(xi).astype(int)
+    y0 = np.floor(yi).astype(int)
+    x1 = np.clip(x0 + 1, 0, nx - 1)
+    y1 = np.clip(y0 + 1, 0, ny - 1)
+    x0 = np.clip(x0, 0, nx - 1)
+    y0 = np.clip(y0, 0, ny - 1)
+
+    wx = xi - x0
+    wy = yi - y0
+    v00 = values[y0, x0]
+    v10 = values[y0, x1]
+    v01 = values[y1, x0]
+    v11 = values[y1, x1]
+    interp = (
+        ((1 - wx) * (1 - wy) * v00)
+        + (wx * (1 - wy) * v10)
+        + ((1 - wx) * wy * v01)
+        + (wx * wy * v11)
+    )
+    return interp.reshape(target_x.shape)
+
+
+def _terrain_adjustment_factor(grid_x, grid_y, elevation_surface):
+    elev = _fill_nan_with_mean(elevation_surface)
+    if not np.isfinite(elev).any():
+        return np.ones_like(elev, dtype=float)
+
+    dx_deg = float(np.nanmedian(np.diff(grid_x[0, :]))) if grid_x.shape[1] > 1 else 0.01
+    dy_deg = float(np.nanmedian(np.diff(grid_y[:, 0]))) if grid_y.shape[0] > 1 else 0.01
+    mid_lat = float(np.nanmean(grid_y))
+    dx_m = max(abs(dx_deg) * (111_000.0 * np.cos(np.radians(mid_lat))), 1.0)
+    dy_m = max(abs(dy_deg) * 111_000.0, 1.0)
+
+    grad_y, grad_x = np.gradient(elev, dy_m, dx_m)
+    slope_mag = np.hypot(grad_x, grad_y)
+
+    def _robust_norm(arr):
+        lo = float(np.nanpercentile(arr, 5))
+        hi = float(np.nanpercentile(arr, 95))
+        if hi <= lo:
+            return np.zeros_like(arr, dtype=float)
+        return np.clip((arr - lo) / (hi - lo), 0.0, 1.0)
+
+    elev_norm = _robust_norm(elev)
+    slope_norm = _robust_norm(slope_mag)
+    factor = 1.0 + (0.12 * elev_norm) + (0.08 * slope_norm)
+    return np.clip(factor, 0.75, 1.35)
+
+
+def _sample_bilinear_at_points(grid_x, grid_y, grid_values, points_lon, points_lat):
+    lon_axis = grid_x[0, :]
+    lat_axis = grid_y[:, 0]
+    px = np.asarray(points_lon, dtype=float)
+    py = np.asarray(points_lat, dtype=float)
+    sample_grid_x = px.reshape(-1, 1)
+    sample_grid_y = py.reshape(-1, 1)
+    sampled = _bilinear_resample_regular_grid(lon_axis, lat_axis, grid_values, sample_grid_x, sample_grid_y)
+    return sampled[:, 0]
+
+
+def _idw_residual_surface(station_lon, station_lat, station_residuals, grid_x, grid_y, power: float = 2.0, k_nearest: int = 8):
+    station_lon = np.asarray(station_lon, dtype=float)
+    station_lat = np.asarray(station_lat, dtype=float)
+    residuals = np.asarray(station_residuals, dtype=float)
+    if residuals.size == 0:
+        return np.zeros_like(grid_x, dtype=float)
+
+    points = np.column_stack([grid_x.ravel(), grid_y.ravel()])
+    station_xy = np.column_stack([station_lon, station_lat])
+    dx = points[:, None, 0] - station_xy[None, :, 0]
+    dy = points[:, None, 1] - station_xy[None, :, 1]
+    dist = np.hypot(dx, dy)
+
+    k = max(1, min(int(k_nearest), residuals.size))
+    if k < residuals.size:
+        nearest_idx = np.argpartition(dist, kth=k - 1, axis=1)[:, :k]
+        nearest_dist = np.take_along_axis(dist, nearest_idx, axis=1)
+        nearest_vals = residuals[nearest_idx]
+    else:
+        nearest_dist = dist
+        nearest_vals = np.broadcast_to(residuals, dist.shape)
+
+    out = np.empty(points.shape[0], dtype=float)
+    zero_mask = nearest_dist <= 1e-12
+    has_zero = zero_mask.any(axis=1)
+    if has_zero.any():
+        zero_cols = zero_mask.argmax(axis=1)
+        row_ids = np.where(has_zero)[0]
+        out[row_ids] = nearest_vals[row_ids, zero_cols[row_ids]]
+
+    no_zero = ~has_zero
+    if no_zero.any():
+        d = nearest_dist[no_zero]
+        v = nearest_vals[no_zero]
+        w = 1.0 / np.power(d, max(1.0, float(power)))
+        out[no_zero] = np.sum(w * v, axis=1) / np.sum(w, axis=1)
+
+    return out.reshape(grid_x.shape)
+
+
+def _nearest_station_distance_km(grid_x: np.ndarray, grid_y: np.ndarray, station_lon: np.ndarray, station_lat: np.ndarray) -> np.ndarray:
+    """
+    Distance (km) from each grid point to nearest station.
+    """
+    if station_lon.size == 0:
+        return np.full_like(grid_x, np.inf, dtype=float)
+
+    mid_lat = float(np.nanmean(grid_y))
+    km_per_deg_lon = max(111.0 * np.cos(np.radians(mid_lat)), 1e-6)
+    km_per_deg_lat = 111.0
+
+    points = np.column_stack([grid_x.ravel(), grid_y.ravel()])
+    station_xy = np.column_stack([station_lon, station_lat])
+    dx_km = (points[:, None, 0] - station_xy[None, :, 0]) * km_per_deg_lon
+    dy_km = (points[:, None, 1] - station_xy[None, :, 1]) * km_per_deg_lat
+    dist_km = np.hypot(dx_km, dy_km)
+    nearest = np.min(dist_km, axis=1)
+    return nearest.reshape(grid_x.shape)
+
+
+def _imprint_station_observations(
+    surface: np.ndarray,
+    grid_x: np.ndarray,
+    grid_y: np.ndarray,
+    station_lon: np.ndarray,
+    station_lat: np.ndarray,
+    station_obs: np.ndarray,
+    influence_km: float = 3.5,
+) -> np.ndarray:
+    """
+    Ensure station observations are visible on the final grid:
+    - exact value at nearest grid node
+    - gentle local imprint around that node so the class patch is visible
+    """
+    out = np.asarray(surface, dtype=float).copy()
+    lon_axis = grid_x[0, :]
+    lat_axis = grid_y[:, 0]
+    mid_lat = float(np.nanmean(grid_y))
+    km_per_deg_lon = max(111.0 * np.cos(np.radians(mid_lat)), 1e-6)
+    km_per_deg_lat = 111.0
+    sigma = max(1.0, influence_km * 0.45)
+
+    for lon, lat, obs in zip(station_lon, station_lat, station_obs):
+        if not (np.isfinite(lon) and np.isfinite(lat) and np.isfinite(obs)):
+            continue
+
+        ix = int(np.argmin(np.abs(lon_axis - lon)))
+        iy = int(np.argmin(np.abs(lat_axis - lat)))
+
+        dx_km = np.abs(lon_axis - lon) * km_per_deg_lon
+        dy_km = np.abs(lat_axis - lat) * km_per_deg_lat
+        x_idx = np.where(dx_km <= influence_km)[0]
+        y_idx = np.where(dy_km <= influence_km)[0]
+        if x_idx.size == 0:
+            x_idx = np.array([ix])
+        if y_idx.size == 0:
+            y_idx = np.array([iy])
+
+        sub = out[np.ix_(y_idx, x_idx)]
+        xx = lon_axis[x_idx][None, :]
+        yy = lat_axis[y_idx][:, None]
+        dist_km = np.hypot((xx - lon) * km_per_deg_lon, (yy - lat) * km_per_deg_lat)
+        blend = np.exp(-(dist_km**2) / (2.0 * sigma**2))
+        blend = np.clip(blend, 0.0, 1.0)
+        out[np.ix_(y_idx, x_idx)] = (blend * obs) + ((1.0 - blend) * sub)
+        out[iy, ix] = float(obs)
+
+    return out
+
+
+def _smooth_nanaware_surface(surface: np.ndarray, iterations: int = 1) -> np.ndarray:
+    arr = np.asarray(surface, dtype=float).copy()
+    for _ in range(max(0, int(iterations))):
+        valid = np.isfinite(arr).astype(float)
+        vals = np.where(np.isfinite(arr), arr, 0.0)
+
+        sum_neighbors = np.zeros_like(arr, dtype=float)
+        cnt_neighbors = np.zeros_like(arr, dtype=float)
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                weight = 4.0 if (dx == 0 and dy == 0) else 1.0
+                sum_neighbors += weight * np.roll(np.roll(vals, dy, axis=0), dx, axis=1)
+                cnt_neighbors += weight * np.roll(np.roll(valid, dy, axis=0), dx, axis=1)
+
+        smoothed = np.where(cnt_neighbors > 0, sum_neighbors / cnt_neighbors, np.nan)
+        arr = np.where(np.isfinite(arr), smoothed, np.nan)
+    return arr
+
+
+def _apply_mesoscale_variability(
+    surface: np.ndarray,
+    grid_x: np.ndarray,
+    grid_y: np.ndarray,
+    report_start_at: str,
+    report_end_at: str,
+    min_frac: float = 0.05,
+    max_frac: float = 0.15,
+) -> np.ndarray:
+    """
+    Add deterministic mesoscale variability (5-15%) so the downscaled field is not overly uniform.
+    """
+    arr = np.asarray(surface, dtype=float)
+    if not np.isfinite(arr).any():
+        return arr
+
+    valid = arr[np.isfinite(arr)]
+    mean_val = float(np.nanmean(valid))
+    if mean_val <= 0:
+        return arr
+
+    # Stable seed across runs for the same map window/extent.
+    seed_src = (
+        f"{report_start_at}|{report_end_at}|"
+        f"{float(np.nanmin(grid_x)):.4f}|{float(np.nanmax(grid_x)):.4f}|"
+        f"{float(np.nanmin(grid_y)):.4f}|{float(np.nanmax(grid_y)):.4f}"
+    )
+    seed = int(hashlib.sha256(seed_src.encode("utf-8")).hexdigest()[:8], 16)
+    rng = np.random.default_rng(seed)
+
+    noise = rng.normal(0.0, 1.0, size=arr.shape)
+    # Smooth random field to get mesoscale patches (not pixel noise).
+    for _ in range(2):
+        noise = _smooth_nanaware_surface(noise, iterations=1)
+
+    amp = float(np.nanpercentile(np.abs(noise), 95))
+    if amp <= 1e-8:
+        return arr
+    noise = noise / amp
+
+    cv = float(np.nanstd(valid) / max(mean_val, 1e-6))
+    frac = float(np.clip(0.10 + (0.12 * cv), min_frac, max_frac))
+    factor = 1.0 + (frac * noise)
+    factor = np.clip(factor, 1.0 - max_frac, 1.0 + max_frac)
+    out = np.where(np.isfinite(arr), np.clip(arr * factor, 0.0, None), np.nan)
+    return out
+
+
+def _gaussian_smooth_nanaware(surface: np.ndarray, sigma: float = 0.8) -> np.ndarray:
+    """
+    Light Gaussian smoothing with NaN awareness.
+    """
+    arr = np.asarray(surface, dtype=float)
+    if not np.isfinite(arr).any():
+        return arr
+
+    valid = np.isfinite(arr).astype(float)
+    vals = np.where(np.isfinite(arr), arr, 0.0)
+
+    try:
+        from scipy.ndimage import gaussian_filter
+
+        num = gaussian_filter(vals, sigma=max(0.1, float(sigma)), mode="nearest")
+        den = gaussian_filter(valid, sigma=max(0.1, float(sigma)), mode="nearest")
+        out = np.where(den > 1e-8, num / den, np.nan)
+        return np.where(np.isfinite(arr), out, np.nan)
+    except Exception:
+        # Fallback if scipy is unavailable.
+        iters = 1 if sigma < 1.0 else 2
+        return _smooth_nanaware_surface(arr, iterations=iters)
+
+
+def _build_downscaled_rainfall_surface(
+    bounds,
+    grid_x,
+    grid_y,
+    stations_in_county: pd.DataFrame,
+    report_start_at: str,
+    report_end_at: str,
+    coarse_km: float = 10.0,
+):
+    _, _, _, _, area_km2 = calculate_map_dimensions(bounds)
+    adaptive_coarse_km = float(coarse_km)
+    if area_km2 > 18000:
+        adaptive_coarse_km = max(adaptive_coarse_km, 12.0)
+    if area_km2 > 35000:
+        adaptive_coarse_km = max(adaptive_coarse_km, 15.0)
+    if area_km2 > 60000:
+        adaptive_coarse_km = max(adaptive_coarse_km, 18.0)
+
+    lon_vals, lat_vals = _build_coarse_grid(bounds, coarse_km=adaptive_coarse_km, max_points=169)
+    coarse_rain, coarse_elev = _fetch_open_meteo_coarse_grid_once(
+        lon_vals=lon_vals,
+        lat_vals=lat_vals,
+        report_start_at=report_start_at,
+        report_end_at=report_end_at,
+    )
+    if np.isnan(coarse_rain).all():
+        raise ValueError("Open-Meteo coarse rainfall field build failed.")
+
+    # 1) Bilinear downscale from coarse Open-Meteo field to 1-2 km target grid.
+    base_surface = _bilinear_resample_regular_grid(lon_vals, lat_vals, coarse_rain, grid_x, grid_y)
+    # 2) Mesoscale variability (5-15%) to avoid flat/uniform patches.
+    mesoscale_surface = _apply_mesoscale_variability(
+        base_surface, grid_x, grid_y, report_start_at, report_end_at, min_frac=0.08, max_frac=0.15
+    )
+    # 3) Terrain adjustment using elevation + slope modulation.
+    elev_surface = _bilinear_resample_regular_grid(lon_vals, lat_vals, coarse_elev, grid_x, grid_y)
+    terrain_factor = _terrain_adjustment_factor(grid_x, grid_y, elev_surface)
+    terrain_adjusted = np.clip(mesoscale_surface * terrain_factor, 0.0, None)
+
+    # 4) Station bias correction via IDW residual spreading.
+    station_lon = stations_in_county["lon"].to_numpy(dtype=float)
+    station_lat = stations_in_county["lat"].to_numpy(dtype=float)
+    station_obs = stations_in_county["rainfall_mm"].to_numpy(dtype=float)
+    modeled_at_stations = _sample_bilinear_at_points(grid_x, grid_y, terrain_adjusted, station_lon, station_lat)
+    residuals = station_obs - modeled_at_stations
+    residuals = np.where(np.isfinite(residuals), residuals, 0.0)
+
+    station_count = len(residuals)
+    if station_count <= 1:
+        correction_strength = 0.10
+    elif station_count == 2:
+        correction_strength = 0.18
+    elif station_count <= 4:
+        correction_strength = 0.30
+    elif station_count <= 8:
+        correction_strength = 0.45
+    else:
+        correction_strength = 0.60
+
+    residual_surface = _idw_residual_surface(
+        station_lon=station_lon,
+        station_lat=station_lat,
+        station_residuals=residuals,
+        grid_x=grid_x,
+        grid_y=grid_y,
+        power=2.0,
+        k_nearest=min(8, max(station_count, 1)),
+    )
+    residual_cap = max(3.0, float(np.nanpercentile(np.abs(residuals), 85)) * 1.0) if station_count > 0 else 0.0
+    residual_surface = np.clip(residual_surface, -residual_cap, residual_cap)
+
+    # Prevent sparse stations from forcing county-wide uniform bias.
+    nearest_dist_km = _nearest_station_distance_km(grid_x, grid_y, station_lon, station_lat)
+    if station_count <= 1:
+        influence_radius_km = 16.0
+    elif station_count <= 3:
+        influence_radius_km = 24.0
+    elif station_count <= 6:
+        influence_radius_km = 34.0
+    else:
+        influence_radius_km = 48.0
+    local_weight = np.exp(-((nearest_dist_km / max(influence_radius_km, 1.0)) ** 2))
+    residual_surface = residual_surface * local_weight
+
+    corrected = np.clip(terrain_adjusted + (correction_strength * residual_surface), 0.0, None)
+
+    # Make station influence visible as local patches while preserving realism.
+    if station_count >= 3:
+        corrected = _imprint_station_observations(
+            corrected,
+            grid_x,
+            grid_y,
+            station_lon=station_lon,
+            station_lat=station_lat,
+            station_obs=station_obs,
+            influence_km=3.0,
+        )
+
+    # 5) Light Gaussian smoothing for final coherent field (kept weak to preserve patchiness).
+    smooth_sigma = 0.45 if station_count <= 8 else 0.55
+    smoothed = _gaussian_smooth_nanaware(corrected, sigma=smooth_sigma)
+    return smoothed
+
+
+def _create_reliable_rainfall_map(
     county_name: str,
     data_file: str,
     shapefile_path: str,
@@ -552,19 +1334,42 @@ def create_reliable_rainfall_map(
     report_end_at: str,
     title_period_label=None,
     map_settings: Optional[MapSettings] = None,
+    output_png_path: Optional[str] = None,
+    return_figure: bool = False,
+    variogram_model: str = "exponential",
+    auto_variogram_model: bool = True,
+    auto_variogram_fit: bool = True,
+    kriging_nlags: int = 12,
 ):
     """
-    Create a rainfall map that blends station observations with Open-Meteo forecast totals.
-    Includes county/sub-county/ward boundaries, ward labels, station points, interpolated
-    rainfall surface, legend, scale bar, compass, and map title.
+    Create a rainfall distribution map using the standard production workflow:
+    Open-Meteo coarse forecast fetch -> offline bilinear downscale -> terrain adjustment
+    -> station residual correction (IDW) -> county clip + thematic rendering.
+
+    Returns PNG bytes and filename to preserve existing API behavior.
     :param map_settings: Styling tweaks for boundaries and labels per user preferences.
+    :param variogram_model: Kept for backward API compatibility (not used in standard path).
+    :param auto_variogram_model: Kept for backward API compatibility (not used in standard path).
+    :param auto_variogram_fit: Kept for backward API compatibility (not used in standard path).
+    :param kriging_nlags: Kept for backward API compatibility (not used in standard path).
     """
     _ = date_cls.fromisoformat(report_start_at)
     _ = date_cls.fromisoformat(report_end_at)
 
     observations = pd.read_csv(data_file)
-    stations = _extract_station_frame(observations)
+    try:
+        stations = _extract_station_frame(observations)
+    except ValueError as exc:
+        # Allow rainfall map generation even when no station dataset is provided.
+        logger.info("rainfall_map_no_station_data_using_downscaled_field", extra={"error": str(exc)})
+        stations = pd.DataFrame(
+            columns=["lat", "lon", "observed_rainfall", "station_name"],
+        )
     wards = gpd.read_file(shapefile_path)
+    if wards.crs is None:
+        wards = wards.set_crs(epsg=4326, allow_override=True)
+    elif wards.crs.to_epsg() != 4326:
+        wards = wards.to_crs(epsg=4326)
 
     county_col = _resolve_column(wards.columns, ["county", "county_name", "adm1_name"])
     ward_col = _resolve_column(wards.columns, ["ward", "ward_name", "adm3_name", "name"])
@@ -590,217 +1395,247 @@ def create_reliable_rainfall_map(
 
     county_boundary = county_wards.dissolve()
     county_polygon = county_boundary.geometry.unary_union
-    station_points = gpd.GeoDataFrame(
-        stations,
-        geometry=gpd.points_from_xy(stations["lon"], stations["lat"]),
-        crs=county_wards.crs,
-    )
-    stations_in_county = station_points[station_points.geometry.within(county_polygon)].copy()
-    if stations_in_county.empty:
-        stations_in_county = station_points.copy()
-
-    forecast_values = []
-    for _, row in stations_in_county.iterrows():
-        try:
-            forecast_values.append(
-                _fetch_open_meteo_station_rainfall(
-                    lat=row["lat"],
-                    lon=row["lon"],
-                    report_start_at=report_start_at,
-                    report_end_at=report_end_at,
-                )
-            )
-        except Exception as exc:
-            logger.warning("station_open_meteo_fetch_failed", extra={"error": str(exc)})
-            forecast_values.append(np.nan)
-
-    stations_in_county["forecast_rainfall"] = forecast_values
-    forecast_available = stations_in_county["forecast_rainfall"].notna().any()
-    if forecast_available:
-        obs_median = float(stations_in_county["observed_rainfall"].median())
-        forecast_median = float(stations_in_county["forecast_rainfall"].median(skipna=True))
-        ratio = (obs_median / forecast_median) if forecast_median > 0 else 999.0
-        forecast_weight = 0.2 if ratio > 3.0 else 0.35
-        stations_in_county["blended_rainfall"] = (
-            stations_in_county["observed_rainfall"] * (1.0 - forecast_weight)
-            + stations_in_county["forecast_rainfall"].fillna(stations_in_county["observed_rainfall"])
-            * forecast_weight
+    if stations.empty:
+        stations_in_county = pd.DataFrame(
+            columns=["lat", "lon", "observed_rainfall", "station_name", "rainfall_mm"],
         )
     else:
-        stations_in_county["blended_rainfall"] = stations_in_county["observed_rainfall"]
+        station_points = gpd.GeoDataFrame(
+            stations,
+            geometry=gpd.points_from_xy(stations["lon"], stations["lat"]),
+            crs=county_wards.crs,
+        )
+        stations_in_county = station_points[station_points.geometry.apply(county_polygon.covers)].copy()
+        if stations_in_county.empty:
+            stations_in_county = station_points.copy()
+        stations_in_county["rainfall_mm"] = stations_in_county["observed_rainfall"]
 
     bounds = county_wards.total_bounds
     lon_min, lat_min, lon_max, lat_max = bounds
-    width = lon_max - lon_min
-    height = lat_max - lat_min
-    margin = max(width, height) * 0.05
-    lon_lin = np.linspace(lon_min - margin, lon_max + margin, 220)
-    lat_lin = np.linspace(lat_min - margin, lat_max + margin, 220)
-    grid_x, grid_y = np.meshgrid(lon_lin, lat_lin)
-    grid_z = _idw_interpolate(stations_in_county, grid_x, grid_y, power=3.0, k_nearest=5)
-
-    inside_mask = np.array(
-        [county_polygon.contains(Point(x, y)) for x, y in zip(grid_x.ravel(), grid_y.ravel())]
-    ).reshape(grid_x.shape)
-    grid_z = np.where(inside_mask, grid_z, np.nan)
-
-    fig = plt.figure(figsize=(14, 14))
-
-    # Single bordered container (like a div) holding title, legend, map, compass, and scale.
-    container_left, container_bottom, container_width, container_height = 0.04, 0.06, 0.92, 0.88
-    container_pad = 0.02
-    fig.add_artist(
-        Rectangle(
-            (container_left, container_bottom),
-            container_width,
-            container_height,
-            transform=fig.transFigure,
-            fill=False,
-            edgecolor="black",
-            linewidth=1.2,
-            zorder=20,
-        )
+    # Primary workflow (fully local math after map input is loaded):
+    # local coarse field (~10 km) -> bilinear downscale (1-2 km) ->
+    # station residual bias correction (IDW, conservative when few stations).
+    (grid_x, grid_y), margin = _build_target_grid(bounds, target_km=1.5)
+    grid_z = _build_downscaled_rainfall_surface(
+        bounds=bounds,
+        grid_x=grid_x,
+        grid_y=grid_y,
+        stations_in_county=stations_in_county,
+        report_start_at=report_start_at,
+        report_end_at=report_end_at,
+        coarse_km=10.0,
     )
 
-    title_band_h = 0.10 * container_height
-    content_top = container_bottom + container_height - title_band_h - container_pad
-    content_bottom = container_bottom + container_pad
-    content_height = content_top - content_bottom
+    # Slightly portrait-oriented canvas so cover-page embedding uses vertical space better.
+    fig = plt.figure(figsize=(12.0, 14.0))
 
-    legend_w = 0.21 * container_width
-    legend_left = container_left + container_pad
-    legend_bottom = content_bottom + (content_height * 0.16)
-    legend_height = content_height * 0.68
-
-    map_left = legend_left + legend_w + (container_pad * 1.2)
-    map_right = container_left + container_width - container_pad
-    map_width = max(0.40, map_right - map_left)
-    map_height = max(0.40, content_height * 0.86)
-    map_bottom = content_bottom + ((content_height - map_height) / 2.0)
-
-    ax = fig.add_axes([map_left, map_bottom, map_width, map_height])
-    thresholds = [0, 10, 20, 30, 40, 60, 80, 100, 130, 160, 200, 260]
-    cmap = ListedColormap(
-        [
-            "#f7fcf5", "#eef9e9", "#e4f6dd", "#d9f2cf", "#cceec1",
-            "#bee9b3", "#afe4a4", "#a0df95", "#91d986", "#82d476", "#73ce67",
-        ]
+    # Outer container: decorations live in this bordered frame, map uses the center panel.
+    container_left, container_bottom, container_width, container_height = 0.035, 0.045, 0.93, 0.91
+    container = Rectangle(
+        (container_left, container_bottom),
+        container_width,
+        container_height,
+        transform=fig.transFigure,
+        fill=False,
+        edgecolor="black",
+        linewidth=1.2,
+        zorder=40,
     )
-    norm = BoundaryNorm(thresholds, cmap.N)
+    fig.add_artist(container)
 
+    # Dynamic panel sizing (fractions of container) so layout scales with different figure sizes.
+    title_band_h = 0.12 * container_height
+    bottom_band_h = 0.04 * container_height
+    left_band_w = 0.17 * container_width  # legend overlay width
+    right_band_w = 0.02 * container_width
+    pad = 0.012 * container_width
+
+    # 15px left alignment for the map image area; map flows under the legend overlay.
+    fig_width_px = max(fig.get_size_inches()[0] * fig.dpi, 1.0)
+    left_offset_fig = 15.0 / fig_width_px
+    map_left = container_left + left_offset_fig
+    map_bottom = container_bottom + bottom_band_h + pad
+    map_width = container_width - left_offset_fig - right_band_w - pad
+    map_height = container_height - title_band_h - bottom_band_h - (2 * pad)
+    ax = fig.add_axes([map_left, map_bottom, map_width, map_height], zorder=5)
+
+    valid_rain = grid_z[np.isfinite(grid_z)]
+    max_rain = float(valid_rain.max()) if valid_rain.size else 50.0
+
+    # Match surface exactly to the requested legend classes:
+    # <5, 5-20, 21-50, >50 mm (all green scale, no red classes).
+    # Matplotlib contour levels must be strictly increasing; keep the top class
+    # break above 50 mm even when observed maxima are <= 50.
+    upper_bound = max(55.0, float(np.ceil(max_rain / 5.0) * 5.0))
+    fill_levels = [0.0, 5.0, 20.0, 50.0, upper_bound]
+    fill_colors = ["#ffffff", "#d9f2cf", "#88cc7a", "#2d7f3d"]
+    fill_cmap = ListedColormap(fill_colors)
+    fill_norm = BoundaryNorm(fill_levels, fill_cmap.N)
     contour = ax.contourf(
         grid_x,
         grid_y,
         grid_z,
-        levels=thresholds,
-        cmap=cmap,
-        norm=norm,
-        alpha=0.9,
-        extend="max",
+        levels=fill_levels,
+        cmap=fill_cmap,
+        norm=fill_norm,
+        antialiased=True,
+        extend="neither",
+        alpha=0.98,
+        zorder=1,
     )
+    # Add subtle internal isohyets so spatial patch structure remains visible even with broad legend classes.
+    finite_vals = grid_z[np.isfinite(grid_z)]
+    if finite_vals.size >= 16:
+        zmin = float(np.nanmin(finite_vals))
+        zmax = float(np.nanmax(finite_vals))
+        if zmax > zmin:
+            line_levels = np.linspace(zmin, zmax, 9)
+            ax.contour(
+                grid_x,
+                grid_y,
+                grid_z,
+                levels=line_levels,
+                colors="#2f4f2f",
+                linewidths=0.0,
+                alpha=0.0,
+                zorder=2,
+            )
+    clip_patch = _geometry_to_clip_patch(county_polygon, ax)
+    if clip_patch is not None:
+        ax.add_patch(clip_patch)
+        for coll in contour.collections:
+            coll.set_clip_path(clip_patch)
 
     county_boundary.boundary.plot(ax=ax, color="black", linewidth=1.8, zorder=4)
 
-    constituency_kwargs = {
-        "color": style["constituency_border_color"],
-        "linewidth": style["constituency_border_width"],
-        "linestyle": style["constituency_border_style"],
-        "zorder": 4,
-    }
+    # Restore internal administrative boundaries and labels (as requested),
+    # while keeping rainfall edge clipping smooth.
     if style["show_constituencies"] and subcounty_col:
-        county_wards.dissolve(by=subcounty_col).boundary.plot(ax=ax, **constituency_kwargs)
+        county_wards.dissolve(by=subcounty_col).boundary.plot(
+            ax=ax,
+            color=style["constituency_border_color"],
+            linewidth=style["constituency_border_width"],
+            linestyle=style["constituency_border_style"],
+            alpha=0.9,
+            zorder=4,
+        )
 
-    ward_kwargs = {
-        "color": style["ward_border_color"],
-        "linewidth": style["ward_border_width"],
-        "linestyle": style["ward_border_style"],
-        "zorder": 4,
-    }
     if style["show_wards"]:
-        county_wards.boundary.plot(ax=ax, **ward_kwargs)
+        county_wards.boundary.plot(
+            ax=ax,
+            color=style["ward_border_color"],
+            linewidth=style["ward_border_width"],
+            linestyle=style["ward_border_style"],
+            alpha=0.9,
+            zorder=4,
+        )
 
     max_labels = 40
     if subcounty_col and style["show_constituency_labels"]:
         const_labels = county_wards.dissolve(by=subcounty_col)
         count = 0
         for const_name, row in const_labels.iterrows():
-            if count >= max_labels:
-                break
-            if row.geometry is None:
+            if count >= max_labels or row.geometry is None:
                 continue
             centroid = row.geometry.representative_point()
-            label_text = str(const_name)[:28]
             ax.text(
                 centroid.x,
                 centroid.y,
-                label_text,
+                str(const_name)[:28],
                 fontsize=style["constituency_label_font_size"],
                 color=style["constituency_border_color"],
                 ha="center",
+                va="center",
                 zorder=5,
             )
             count += 1
 
     if ward_col and style["show_ward_labels"]:
-        for _, row in county_wards.head(max_labels).iterrows():
-            centroid = row.geometry.representative_point()
-            label = str(row[ward_col])[:28]
+        count = 0
+        for _, row in county_wards.iterrows():
+            if count >= max_labels:
+                break
+            geom = row.geometry
+            if geom is None:
+                continue
+            centroid = geom.representative_point()
             ax.text(
                 centroid.x,
                 centroid.y,
-                label,
+                str(row.get(ward_col, ""))[:28],
                 fontsize=style["ward_label_font_size"],
                 color=style["ward_border_color"],
                 ha="center",
+                va="center",
                 zorder=5,
             )
+            count += 1
 
-    ax.scatter(
-        stations_in_county["lon"],
-        stations_in_county["lat"],
-        s=36,
-        color="black",
-        edgecolor="white",
-        linewidth=0.5,
-        zorder=6,
-        label="Rainfall station",
+    # Custom rainfall legend panel (outside map).
+    legend_ax = fig.add_axes(
+        [
+            container_left + (0.015 * container_width),
+            map_bottom + (0.12 * map_height),
+            left_band_w - (0.03 * container_width),
+            map_height * 0.76,
+        ],
+        zorder=20,
     )
-
-    # Legend panel positioned left-center inside the same container.
-    legend_ax = fig.add_axes([legend_left, legend_bottom, legend_w, legend_height])
     legend_ax.set_xlim(0, 1)
     legend_ax.set_ylim(0, 1)
     legend_ax.axis("off")
-
+    legend_ax.add_patch(
+        Rectangle((0.0, 0.0), 1.0, 1.0, facecolor="white", edgecolor="none", linewidth=0.0, alpha=0.94, zorder=0)
+    )
     legend_ax.text(
-        0.5,
-        0.97,
-        "Rainfall distribution in mm",
-        ha="center",
+        0.02,
+        0.96,
+        "Rainfall distribution (mm)",
+        ha="left",
         va="top",
-        fontsize=12,
+        fontsize=10,
         fontweight="bold",
     )
-
     legend_items = [
-        ("<5 mm", "#f7fcf5"),
+        ("<5 mm", "#ffffff"),
         ("5-20 mm", "#d9f2cf"),
-        ("21-50 mm", "#afe4a4"),
-        (">50 mm", "#82d476"),
+        ("21-50 mm", "#88cc7a"),
+        (">50 mm", "#2d7f3d"),
     ]
+
+    # Pixel-precise legend geometry for clean visual rhythm.
+    fig_w_px = max(fig.get_size_inches()[0] * fig.dpi, 1.0)
+    fig_h_px = max(fig.get_size_inches()[1] * fig.dpi, 1.0)
+    legend_w_px = max((left_band_w - (0.03 * container_width)) * fig_w_px, 1.0)
+    legend_h_px = max((map_height * 0.76) * fig_h_px, 1.0)
+
+    square_px = 22.0
+    between_px = 12.0
+    text_offset_px = 8.0
+
+    square_w = square_px / legend_w_px
+    square_h = square_px / legend_h_px
+    step_y = (square_px + between_px) / legend_h_px
+    text_offset_x = text_offset_px / legend_w_px
+
+    x0 = 0.06
     y = 0.84
     for label, color in legend_items:
         legend_ax.add_patch(
-            Rectangle((0.08, y - 0.032), 0.18, 0.065, facecolor=color, edgecolor="black", linewidth=0.9)
+            Rectangle(
+                (x0, y - (square_h / 2.0)),
+                square_w,
+                square_h,
+                facecolor=color,
+                edgecolor="black",
+                linewidth=0.9,
+            )
         )
-        legend_ax.text(0.32, y, label, ha="left", va="center", fontsize=11)
-        y -= 0.16
+        legend_ax.text(x0 + square_w + text_offset_x, y, label, ha="left", va="center", fontsize=9)
+        y -= step_y
 
-    legend_ax.plot([0.17], [0.16], marker="o", markersize=8, color="black")
-    legend_ax.text(0.32, 0.16, "Rainfall station", ha="left", va="center", fontsize=11)
-
+    # Scale on bottom-right of the map (original in-map placement).
     _add_scale_bar(ax, (lon_min, lat_min, lon_max, lat_max))
-    _add_compass_rose(fig, (container_left, container_bottom, container_width, container_height))
 
     start_label = date_cls.fromisoformat(report_start_at).isoformat()
     end_label = date_cls.fromisoformat(report_end_at).isoformat()
@@ -809,34 +1644,45 @@ def create_reliable_rainfall_map(
         if title_period_label is not None and str(title_period_label).strip()
         else f"{start_label} to {end_label}"
     )
-    title = f"FORECASTED CUMULATIVE RAINFALL VALID ({period_label})"
-    # Title is top-center inside the same container.
+    title = f"FORECASTED CUMULATIVE RAINFALL VALID {period_label}"
+    title_y = container_bottom + container_height - (title_band_h * 0.5)
     fig.text(
-        container_left + (container_width / 2.0),
-        container_bottom + container_height - (title_band_h / 2.0),
+        container_left + (container_width * 0.50),
+        title_y,
         title,
         ha="center",
         va="center",
-        fontsize=16,
+        fontsize=14,
         fontweight="bold",
+        zorder=30,
     )
+
+    # Compass rose in top-right of the bordered layout, outside map.
+    _add_compass_rose(fig, (container_left, container_bottom, container_width, container_height))
+
     ax.set_xlabel("")
     ax.set_ylabel("")
     ax.set_xticks([])
     ax.set_yticks([])
-    ax.set_frame_on(False)
     for spine in ax.spines.values():
         spine.set_visible(False)
+    ax.set_facecolor("none")
+    fig.patch.set_facecolor("white")
     ax.set_xlim(lon_min - margin, lon_max + margin)
     ax.set_ylim(lat_min - margin, lat_max + margin)
     ax.set_aspect("equal")
 
-    # Save full composed figure without cropping container edges.
-    buffer = io.BytesIO()
-    plt.savefig(buffer, format="png", dpi=300, facecolor="white")
-    plt.close(fig)
-    buffer.seek(0)
-
     stamp = datetime.utcnow().strftime("%Y%m%d")
     filename = f"{county_name.replace(' ', '_').lower()}_reliable_rainfall_{stamp}.png"
+    if return_figure:
+        if output_png_path:
+            fig.savefig(output_png_path, format="png", dpi=300, facecolor="white")
+        return fig, filename
+
+    buffer = io.BytesIO()
+    fig.savefig(buffer, format="png", dpi=300, facecolor="white")
+    if output_png_path:
+        fig.savefig(output_png_path, format="png", dpi=300, facecolor="white")
+    plt.close(fig)
+    buffer.seek(0)
     return buffer.getvalue(), filename

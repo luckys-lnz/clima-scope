@@ -2,9 +2,9 @@
 
 import { useRef, useState } from "react"
 import { Loader2, Check, AlertTriangle } from "lucide-react"
-import { uploadService } from "../app/services/uploadService"
+import { uploadService } from "@/lib/services/uploadService"
+import { getCurrentWeeklyReportWindow } from "@/lib/utils/report_date"
 import { FileUploadSection } from "./file-upload-section"
-import type { Upload } from "@/app/models/upload"
 
 interface DataUploadProps {
   onBack: () => void
@@ -49,9 +49,20 @@ export function DataUpload({ onBack }: DataUploadProps) {
       setStep("uploading")
       setError(null)
 
-      for (const file of files) {
-        await uploadService.uploadFile(file)
+      const window = getCurrentWeeklyReportWindow(new Date())
+      const toIsoDate = (d: Date) => {
+        const y = d.getFullYear()
+        const m = String(d.getMonth() + 1).padStart(2, "0")
+        const day = String(d.getDate()).padStart(2, "0")
+        return `${y}-${m}-${day}`
       }
+
+      await uploadService.uploadFiles(files, "observations", {
+        report_week: window.week,
+        report_year: window.year,
+        report_start_at: toIsoDate(window.start),
+        report_end_at: toIsoDate(window.end),
+      })
 
       setStep("done")
     } catch (err: any) {
@@ -77,7 +88,7 @@ export function DataUpload({ onBack }: DataUploadProps) {
       <div className="max-w-3xl space-y-6">
         {/* HEADER */}
         <div className="bg-black rounded-lg border border-gray-700 p-6 text-white">
-          <h1 className="font-bold text-xl">Upload Data</h1>
+          <h1 className="font-bold text-xl">Station Data</h1>
           <p className="text-sm text-gray-300">
             High-resolution weather observation data for ward-level forecasts
           </p>
@@ -115,6 +126,9 @@ export function DataUpload({ onBack }: DataUploadProps) {
                     step === "done" ? "text-green-300" : "text-red-300"
                   }`}
                 >
+                  {step === "done"
+                    ? `${files.length} file(s) uploaded successfully for the selected report window.`
+                    : error || "Please check file format and try again."}
                 </p>
               </div>
             </div>
@@ -123,7 +137,7 @@ export function DataUpload({ onBack }: DataUploadProps) {
 
         {/* FILE UPLOAD */}
         <FileUploadSection
-          title="Weather Observation Data (CSV required)"
+          title="Weather station Data (CSV required)"
           description="Upload high-resolution weather data for accurate ward-level forecasts"
           files={files}
           onFileSelect={handleFileSelect}

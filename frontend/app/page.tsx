@@ -13,25 +13,27 @@ export default function Home() {
       <nav className="border-b border-border/40 backdrop-blur-sm sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Cloud className="w-8 h-8 text-accent-blue" />
-            <span className="text-xl font-bold">cimate scoop</span>
+            {/* <Cloud className="w-8 h-8 text-accent-blue" /> */}
+            <Link href="/">
+            <span className="text-xl font-bold">clima scope</span>
+            </Link>
           </div>
           <div className="flex items-center gap-4">
             <Link
-              href="/pricing"
-              className="px-4 py-2 text-sm font-medium rounded-lg hover:bg-secondary transition-colors"
+              href="/#pricing"
+              className="px-4 py-2 text-sm font-medium rounded-lg hover:bg-secondary transition-colors transition-transform duration-200 hover:-translate-y-0.5 active:translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
               Pricing
             </Link>
             <Link
               href="/sign-in"
-              className="px-4 py-2 text-sm font-medium rounded-lg hover:bg-secondary transition-colors"
+              className="px-4 py-2 text-sm font-medium rounded-lg hover:bg-secondary transition-colors transition-transform duration-200 hover:-translate-y-0.5 active:translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
               Sign In
             </Link>
             <Link
               href="/sign-up"
-              className="px-4 py-2 text-sm font-medium bg-accent-blue text-white rounded-lg hover:bg-accent-blue/90 transition-colors"
+              className="px-4 py-2 text-sm font-medium bg-accent-blue text-white rounded-lg hover:bg-accent-blue/90 transition-colors transition-transform duration-200 hover:-translate-y-0.5 active:translate-y-0.5 shadow-sm hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
               Get Started
             </Link>
@@ -49,16 +51,16 @@ export default function Home() {
             Real-time forecasting and reporting for all 47 Kenyan counties. Generate comprehensive weather reports with
             integrated geospatial data and automated distribution.
           </p>
-          <div className="flex col sm:row gap-4 justify-center pt-4">
+          <div className="flex flex-col sm:flex-row gap-4 justify-center pt-4">
             <Link
               href="/sign-up"
-              className="px-8 py-3 bg-accent-blue text-white rounded-lg font-medium hover:bg-accent-blue/90 transition-colors"
+              className="px-8 py-3 bg-accent-blue text-white rounded-lg font-medium hover:bg-accent-blue/90 transition-colors transition-transform duration-200 hover:-translate-y-0.5 active:scale-[0.98] shadow-sm hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
               Start Reporting
             </Link>
             <Link
               href="/sign-in"
-              className="px-8 py-3 border border-border rounded-lg font-medium hover:bg-secondary transition-colors"
+              className="px-8 py-3 border border-border rounded-lg font-medium hover:bg-secondary transition-colors transition-transform duration-200 hover:-translate-y-0.5 active:scale-[0.98] shadow-sm hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
               Sign In
             </Link>
@@ -71,7 +73,7 @@ export default function Home() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <h2 className="text-3xl font-bold text-center mb-16">Powerful Features</h2>
           <div className="grid md:grid-cols-3 gap-8">
-            <div className="p-6 rounded-lg border border-border/40 hover:border-border/80 transition-colors bg-card">
+            <div className="p-6 rounded-lg border border-border/40 bg-card transform-gpu transition-all duration-200 hover:-translate-y-1 hover:border-border/80 hover:shadow-md">
               <BarChart3 className="w-12 h-12 text-accent-blue mb-4" />
               <h3 className="text-lg font-semibold mb-2">Automated Generation</h3>
               <p className="text-sm text-muted-foreground">
@@ -79,7 +81,7 @@ export default function Home() {
                 observations automatically.
               </p>
             </div>
-            <div className="p-6 rounded-lg border border-border/40 hover:border-border/80 transition-colors bg-card">
+            <div className="p-6 rounded-lg border border-border/40 bg-card transform-gpu transition-all duration-200 hover:-translate-y-1 hover:border-border/80 hover:shadow-md">
               <MapPin className="w-12 h-12 text-accent-orange mb-4" />
               <h3 className="text-lg font-semibold mb-2">Geospatial Data</h3>
               <p className="text-sm text-muted-foreground">
@@ -87,7 +89,7 @@ export default function Home() {
                 comprehensive analysis.
               </p>
             </div>
-            <div className="p-6 rounded-lg border border-border/40 hover:border-border/80 transition-colors bg-card">
+            <div className="p-6 rounded-lg border border-border/40 bg-card transform-gpu transition-all duration-200 hover:-translate-y-1 hover:border-border/80 hover:shadow-md">
               <TrendingUp className="w-12 h-12 text-accent-green mb-4" />
               <h3 className="text-lg font-semibold mb-2">Real-time Monitoring</h3>
               <p className="text-sm text-muted-foreground">
@@ -105,7 +107,7 @@ export default function Home() {
           <h2 className="text-3xl font-bold text-center mb-16">Everything You Need</h2>
           <div className="grid sm:grid-cols-2 gap-12">
             <div className="space-y-6">
-              <div className="flex gap-4">
+              <div className="flex gap-4 p-2 -m-2 rounded-lg transition-colors duration-200 hover:bg-secondary/30">
                 <Zap className="w-6 h-6 text-accent-blue shrink-0 mt-1" />
                 <div>
                   <h3 className="font-semibold mb-2">Manual Report Generation</h3>
@@ -114,7 +116,7 @@ export default function Home() {
                   </p>
                 </div>
               </div>
-              <div className="flex gap-4">
+              <div className="flex gap-4 p-2 -m-2 rounded-lg transition-colors duration-200 hover:bg-secondary/30">
                 <BarChart3 className="w-6 h-6 text-accent-orange shrink-0 mt-1" />
                 <div>
                   <h3 className="font-semibold mb-2">Report Archive</h3>
@@ -123,7 +125,7 @@ export default function Home() {
                   </p>
                 </div>
               </div>
-              <div className="flex gap-4">
+              <div className="flex gap-4 p-2 -m-2 rounded-lg transition-colors duration-200 hover:bg-secondary/30">
                 <Lock className="w-6 h-6 text-accent-green shrink-0 mt-1" />
                 <div>
                   <h3 className="font-semibold mb-2">System Configuration</h3>
@@ -134,7 +136,7 @@ export default function Home() {
               </div>
             </div>
             <div className="space-y-6">
-              <div className="flex gap-4">
+              <div className="flex gap-4 p-2 -m-2 rounded-lg transition-colors duration-200 hover:bg-secondary/30">
                 <Cloud className="w-6 h-6 text-accent-blue shrink-0 mt-1" />
                 <div>
                   <h3 className="font-semibold mb-2">Data Management</h3>
@@ -143,7 +145,7 @@ export default function Home() {
                   </p>
                 </div>
               </div>
-              <div className="flex gap-4">
+              <div className="flex gap-4 p-2 -m-2 rounded-lg transition-colors duration-200 hover:bg-secondary/30">
                 <TrendingUp className="w-6 h-6 text-accent-orange shrink-0 mt-1" />
                 <div>
                   <h3 className="font-semibold mb-2">Comprehensive Logging</h3>
@@ -152,7 +154,7 @@ export default function Home() {
                   </p>
                 </div>
               </div>
-              <div className="flex gap-4">
+              <div className="flex gap-4 p-2 -m-2 rounded-lg transition-colors duration-200 hover:bg-secondary/30">
                 <MapPin className="w-6 h-6 text-accent-green shrink-0 mt-1" />
                 <div>
                   <h3 className="font-semibold mb-2">County Details</h3>
@@ -178,7 +180,7 @@ export default function Home() {
           </p>
           <Link
             href="/sign-up"
-            className="inline-block px-8 py-3 bg-accent-blue text-white rounded-lg font-medium hover:bg-accent-blue/90 transition-colors"
+            className="inline-block px-8 py-3 bg-accent-blue text-white rounded-lg font-medium hover:bg-accent-blue/90 transition-colors transition-transform duration-200 hover:-translate-y-0.5 active:scale-[0.98] shadow-sm hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           >
             Create Your Account
           </Link>
