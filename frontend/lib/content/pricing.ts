@@ -15,6 +15,7 @@ export type PricingPlan = Readonly<{
   name: string
   description: string
   monthly: number
+  annual: number
   cta: string
   ctaVariant: ButtonVariant
   isPopular: boolean
@@ -28,11 +29,11 @@ export type PricingFaq = Readonly<{
 
 export const PRICING_PLANS = [
   {
-
     id: "pro",
     name: "Weather Reporting",
     description: "One plan with flexible monthly or yearly billing.",
-    monthly: 1000,
+    monthly: 1294,
+    annual: 15522,
     cta: "Go Pro",
     ctaVariant: "default",
     isPopular: false,
@@ -52,7 +53,7 @@ export const PRICING_FAQS = [
   {
     question: "Can I upgrade or downgrade later?",
     answer:
-      "Yes. You can switch plans anytime, and changes take effect on the next billing cycle.",
+      "Yes. You can switch between monthly and yearly billing, and changes take effect on the next billing cycle.",
   },
   {
     question: "What happens if we hit usage limits?",
@@ -65,14 +66,13 @@ export const PRICING_FAQS = [
       "Absolutely. Cancel whenever you need - your plan stays active until the end of the current billing period.",
   },
   {
-    question: "Do you offer annual billing discounts?",
+    question: "Do you offer both monthly and yearly billing?",
     answer:
-      "Yes. Yearly billing is KES 10,000 instead of KES 12,000, which is a 16.67% discount.",
+      "Yes. You can subscribe monthly or yearly, depending on how your team prefers to manage billing.",
   },
   {
     question: "What's included in Enterprise support?",
     answer:
       "Enterprise includes onboarding, implementation guidance, and a dedicated support channel with an SLA.",
-
   },
 ] as const satisfies ReadonlyArray<PricingFaq>

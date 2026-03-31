@@ -19,7 +19,7 @@ import {
 import { Switch } from "@/components/ui/switch"
 import { useAuth } from "@/hooks/useAuth"
 import { cn } from "@/lib/utils"
-import { PRICING_FAQS, PRICING_PLANS, type PlanId } from "@/lib/content/pricing"
+import { PRICING_FAQS, PRICING_PLANS, type PlanId, type PricingPlan } from "@/lib/content/pricing"
 import { subscriptionService, type SubscriptionPlan } from "@/lib/services/subscriptionService"
 
 type BillingCycle = "monthly" | "annual"
@@ -27,16 +27,14 @@ type HeadingLevel = "h1" | "h2"
 
 const BILLING_CONFIG = {
   monthly: {
-    amount: 1000,
     label: "Billed monthly",
     period: "/month",
   },
   annual: {
-    amount: 10000,
     label: "Billed yearly",
     period: "/year",
   },
-} as const satisfies Record<BillingCycle, { amount: number; label: string; period: string }>
+} as const satisfies Record<BillingCycle, { label: string; period: string }>
 
 const HEADING_STYLES: Record<HeadingLevel, string> = {
   h1: "text-4xl sm:text-5xl font-bold",
@@ -65,9 +63,11 @@ export function PricingSection({
 
   const isAnnual = billingCycle === "annual"
   const HeadingTag = headingLevel
+  const getPriceForCycle = (plan: PricingPlan, cycle: BillingCycle): number =>
+    cycle === "annual" ? plan.annual : plan.monthly
 
   const resolveBackendPlan = (plans: SubscriptionPlan[], cycle: BillingCycle): SubscriptionPlan | null => {
-    const targetAmount = BILLING_CONFIG[cycle].amount
+    const targetAmount = getPriceForCycle(PRICING_PLANS[0], cycle)
     const targetCycle = cycle === "annual" ? "yearly" : "monthly"
 
     const exact = plans.find((p) => {
@@ -128,7 +128,7 @@ export function PricingSection({
             Choose your plan
           </HeadingTag>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            Simple pricing for weather reporting operations.
+            Simple pricing for Kenyan weather reporting operations.
           </p>
         </div>
 
@@ -152,25 +152,23 @@ export function PricingSection({
               aria-label="Toggle annual billing"
             />
             <div className="flex items-center gap-2">
-            <span
-              className={cn(
-                "text-sm font-medium transition-colors",
-                isAnnual ? "text-zinc-100" : "text-zinc-400",
-              )}
-            >
-              Annual
-            </span>
-            {isAnnual && <Badge variant="secondary">Save 16.67%</Badge>}
+              <span
+                className={cn(
+                  "text-sm font-medium transition-colors",
+                  isAnnual ? "text-zinc-100" : "text-zinc-400",
+                )}
+              >
+                Yearly
+              </span>
             </div>
           </div>
         </div>
 
         <div className="mt-12 max-w-3xl mx-auto">
           {PRICING_PLANS.map((plan) => {
-            const price = BILLING_CONFIG[billingCycle].amount
+            const price = getPriceForCycle(plan, billingCycle)
             const isLoading = loadingPlan === plan.id
             const isPopularOffer = isAnnual
-            const isGoProDisabled = plan.id === "pro"
 
             return (
               <Card
@@ -203,7 +201,9 @@ export function PricingSection({
                       {BILLING_CONFIG[billingCycle].label}
                     </p>
                     {isAnnual && (
-                      <p className="text-sm font-medium text-primary">You save 16.67% on yearly billing.</p>
+                      <p className="text-sm font-medium text-primary">
+                        Full-year coverage for teams that prefer one annual invoice.
+                      </p>
                     )}
                   </div>
                   <ul className="space-y-3 md:pt-1">
@@ -234,9 +234,8 @@ export function PricingSection({
                   <Button
                     className="w-full h-11"
                     variant={plan.ctaVariant}
-                    disabled={isLoading || isGoProDisabled}
+                    disabled={isLoading}
                     onClick={() => {
-                      if (isGoProDisabled) return
                       void handleCheckout(plan.id)
                     }}
                   >

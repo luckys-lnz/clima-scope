@@ -3,9 +3,106 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Cloud, AlertCircle, CheckCircle } from "lucide-react";
+import {
+  AlertCircle,
+  Check,
+  CheckCircle,
+  Cloud,
+  Eye,
+  EyeOff,
+  FileText,
+  MapPinned,
+  Send,
+} from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Progress } from "@/components/ui/progress";
 import { authService } from "@/lib/services/authService";
+import { cn } from "@/lib/utils";
 import type { SignUpData } from "@/lib/models/auth";
+
+const INPUT_CLASSNAME =
+  "h-11 rounded-xl border border-slate-300 bg-white shadow-sm caret-slate-900 focus-visible:bg-white focus-visible:border-sky-600 focus-visible:ring-2 focus-visible:ring-sky-500/40";
+
+const SELECT_CLASSNAME =
+  "flex h-11 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950 shadow-none outline-none transition-[color,box-shadow] focus-visible:border-sky-500 focus-visible:ring-[3px] focus-visible:ring-sky-500/20 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50";
+
+const PASSWORD_REQUIREMENTS = [
+  { key: "length", label: "At least 8 characters" },
+  { key: "uppercase", label: "One uppercase letter" },
+  { key: "lowercase", label: "One lowercase letter" },
+  { key: "number", label: "One number" },
+  { key: "special", label: "One special character" },
+] as const;
+
+type PasswordRequirementKey = (typeof PASSWORD_REQUIREMENTS)[number]["key"];
+
+function getPasswordChecks(password: string): Record<PasswordRequirementKey, boolean> {
+  return {
+    length: password.length >= 8,
+    uppercase: /[A-Z]/.test(password),
+    lowercase: /[a-z]/.test(password),
+    number: /\d/.test(password),
+    special: /[^A-Za-z0-9]/.test(password),
+  };
+}
+
+function getPasswordStrength(password: string) {
+  const checks = getPasswordChecks(password);
+  const metRequirements = Object.values(checks).filter(Boolean).length;
+  const bonusPoint = password.length >= 12 ? 1 : 0;
+  const score = Math.min(metRequirements + bonusPoint, 5);
+
+  if (!password) {
+    return {
+      checks,
+      progress: 0,
+      label: "Start typing a password",
+      textClass: "text-slate-500",
+      indicatorClass: "[&_[data-slot=progress-indicator]]:bg-slate-400",
+    };
+  }
+
+  if (score <= 2) {
+    return {
+      checks,
+      progress: 25,
+      label: "Weak password",
+      textClass: "text-red-500",
+      indicatorClass: "[&_[data-slot=progress-indicator]]:bg-red-500",
+    };
+  }
+
+  if (score === 3) {
+    return {
+      checks,
+      progress: 55,
+      label: "Fair password",
+      textClass: "text-amber-500",
+      indicatorClass: "[&_[data-slot=progress-indicator]]:bg-amber-500",
+    };
+  }
+
+  if (score === 4) {
+    return {
+      checks,
+      progress: 78,
+      label: "Strong password",
+      textClass: "text-sky-600",
+      indicatorClass: "[&_[data-slot=progress-indicator]]:bg-sky-500",
+    };
+  }
+
+  return {
+    checks,
+    progress: 100,
+    label: "Very strong password",
+    textClass: "text-emerald-600",
+    indicatorClass: "[&_[data-slot=progress-indicator]]:bg-emerald-500",
+  };
+}
 
 export default function SignUp() {
   const router = useRouter();
@@ -23,6 +120,15 @@ export default function SignUp() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  const passwordStrength = getPasswordStrength(formData.password);
+  const passwordsMatch =
+    Boolean(formData.password) &&
+    Boolean(formData.confirmPassword) &&
+    formData.password === formData.confirmPassword;
+  const confirmPasswordHasValue = Boolean(formData.confirmPassword);
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
@@ -32,37 +138,31 @@ export default function SignUp() {
   };
 
   const validateForm = (): string | null => {
-    // Required fields
     if (
       !formData.full_name ||
       !formData.email ||
       !formData.password ||
       !formData.confirmPassword ||
-      !formData.organization
+      !formData.organization ||
+      !formData.county
     ) {
       return "Please fill in all required fields";
     }
 
-    // Email format
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(formData.email)) {
       return "Please enter a valid email address";
     }
 
-    // Password length
     if (formData.password.length < 8) {
       return "Password must be at least 8 characters";
     }
 
-    // Password strength
-    const hasUpperCase = /[A-Z]/.test(formData.password);
-    const hasLowerCase = /[a-z]/.test(formData.password);
-    const hasNumber = /\d/.test(formData.password);
-    if (!hasUpperCase || !hasLowerCase || !hasNumber) {
-      return "Password must contain at least one uppercase letter, one lowercase letter, and one number";
+    const checks = getPasswordChecks(formData.password);
+    if (!checks.uppercase || !checks.lowercase || !checks.number || !checks.special) {
+      return "Password must contain uppercase, lowercase, numeric, and special characters";
     }
 
-    // Password match
     if (formData.password !== formData.confirmPassword) {
       return "Passwords do not match";
     }
@@ -84,13 +184,12 @@ export default function SignUp() {
     setIsLoading(true);
 
     try {
-      // Use AuthService for signup
       await authService.signup({
         full_name: formData.full_name,
         email: formData.email,
         password: formData.password,
         organization: formData.organization,
-        county: formData.county || undefined,
+        county: formData.county,
         phone: formData.phone || undefined,
       });
 
@@ -107,8 +206,9 @@ export default function SignUp() {
         county: "",
         phone: "",
       });
+      setShowPassword(false);
+      setShowConfirmPassword(false);
 
-      // Redirect to login after a short delay
       setTimeout(() => router.push("/sign-in"), 2000);
     } catch (err: any) {
       const msg = err.message.toLowerCase();
@@ -187,187 +287,331 @@ export default function SignUp() {
   ].sort();
 
   return (
-    <div className="min-h-screen bg-background flex justify-center items-center px-4">
-      <div className="w-full max-w-md">
-        {/* Header */}
-        <div className="text-center mb-8">
-          <Link
-            href="/"
-            className="inline-flex items-center gap-2 mb-6 hover:opacity-80 transition-opacity"
-          >
-            <Cloud className="w-8 h-8 text-accent-blue" />
-            <span className="text-xl font-bold">Weather Reports</span>
-          </Link>
-          <h1 className="text-3xl font-bold mb-2">Create Account</h1>
-          <p className="text-muted-foreground">
-            Join Kenya's automated weather reporting system
-          </p>
-        </div>
+    <div className="min-h-screen bg-background text-foreground">
+      <div className="mx-auto flex min-h-screen max-w-7xl items-center px-4 py-8">
+        <div className="grid w-full overflow-hidden rounded-[28px] border border-border/40 bg-card shadow-[0_32px_120px_rgba(0,0,0,0.45)] lg:grid-cols-[1.1fr_0.9fr]">
+          <section className="relative overflow-hidden border-b border-border/40 bg-secondary/30 px-7 py-8 sm:px-9 lg:border-b-0 lg:border-r lg:px-12 lg:py-12">
+            <div className="relative z-10">
+              <Link
+                href="/"
+                className="inline-flex items-center gap-2 text-sm font-medium transition-opacity hover:opacity-80"
+              >
+                <span className="text-lg font-semibold tracking-wide">Clima Scope</span>
+              </Link>
 
-        {/* Form */}
-        <form
-          onSubmit={handleSubmit}
-          className="space-y-4 bg-card border border-border/40 p-6 rounded-lg"
-        >
-          {error && (
-            <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 flex gap-3 items-start">
-              <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
-              <p className="text-sm text-red-500">{error}</p>
-            </div>
-          )}
-          {success && (
-            <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/20 flex gap-3 items-start">
-              <CheckCircle className="w-5 h-5 text-green-500 shrink-0 mt-0.5" />
-              <div>
-                <p className="text-sm text-green-500 font-medium">{success}</p>
-                <p className="text-xs text-green-600 mt-1">
-                  Redirecting to login in a few seconds...
+              <div className="mt-10 max-w-lg space-y-5">
+                <p className="text-xs font-semibold uppercase tracking-[0.28em] text-accent-blue">
+                  County Setup
+                </p>
+                <h1 className="text-4xl font-semibold leading-tight">
+                  Create an account built for county reporting operations.
+                </h1>
+                <p className="text-base leading-7 text-muted-foreground">
+                  Set up a workspace for your county team, secure your report workflow,
+                  and start generating structured weather outputs with the right regional context from day one.
                 </p>
               </div>
+
+              <div className="mt-10 grid gap-4">
+                {[
+                  {
+                    icon: MapPinned,
+                    title: "County-aware setup",
+                    description: "Tie the account to the county your team supports so dashboards and workflows start in the right context.",
+                  },
+                  {
+                    icon: FileText,
+                    title: "Operational reporting",
+                    description: "Prepare weekly outputs, county summaries, and distribution-ready material in one place.",
+                  },
+                  {
+                    icon: Send,
+                    title: "Distribution readiness",
+                    description: "Keep email delivery, automation, and review workflows aligned with the team responsible for the report.",
+                  },
+                ].map((item) => {
+                  const Icon = item.icon;
+
+                  return (
+                    <div key={item.title} className="rounded-2xl border border-border/40 bg-background/40 p-4">
+                      <div className="flex items-start gap-4">
+                        <div className="rounded-xl bg-accent-blue/10 p-2 text-accent-blue">
+                          <Icon className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <h2 className="text-sm font-semibold">{item.title}</h2>
+                          <p className="mt-1 text-sm leading-6 text-muted-foreground">{item.description}</p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-          )}
+          </section>
 
-          {/* Full Name */}
-          <div className="space-y-2">
-            <label className="block text-sm font-medium">
-              Full Name <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              name="full_name"
-              value={formData.full_name}
-              onChange={handleChange}
-              placeholder="John Doe"
-              className="w-full px-3 py-2 border border-border/40 rounded-lg bg-background focus:outline-none focus:border-accent-blue focus:ring-1 focus:ring-accent-blue/50"
-              required
-              disabled={isLoading}
-            />
-          </div>
+          <section className="bg-card px-6 py-8 sm:px-8 lg:px-10 lg:py-12">
+            <div className="mx-auto w-full max-w-md">
+              <div className="mb-8">
+                <h2 className="text-3xl font-semibold tracking-tight">Create your workspace</h2>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  Use your work details so county dashboards, reporting workflows, and forecast operations are configured correctly.
+                </p>
+              </div>
 
-          {/* Email */}
-          <div className="space-y-2">
-            <label className="block text-sm font-medium">
-              Email <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="email"
-              name="email"
-              value={formData.email}
-              onChange={handleChange}
-              placeholder="you@example.com"
-              className="w-full px-3 py-2 border border-border/40 rounded-lg bg-background focus:outline-none focus:border-accent-blue focus:ring-1 focus:ring-accent-blue/50"
-              required
-              disabled={isLoading}
-            />
-          </div>
+              <form onSubmit={handleSubmit} className="space-y-5">
+                {error && (
+                  <div className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 p-4">
+                    <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-500" />
+                    <p className="text-sm leading-6 text-red-700">{error}</p>
+                  </div>
+                )}
+                {success && (
+                  <div className="flex items-start gap-3 rounded-2xl border border-green-200 bg-green-50 p-4">
+                    <CheckCircle className="mt-0.5 h-5 w-5 shrink-0 text-green-500" />
+                    <div>
+                      <p className="text-sm font-medium text-green-700">{success}</p>
+                      <p className="mt-1 text-xs text-green-600">Redirecting to login in a few seconds...</p>
+                    </div>
+                  </div>
+                )}
 
-          {/* Password */}
-          <div className="space-y-2">
-            <label className="block text-sm font-medium">
-              Password <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="password"
-              name="password"
-              value={formData.password}
-              onChange={handleChange}
-              placeholder="••••••••"
-              className="w-full px-3 py-2 border border-border/40 rounded-lg bg-background focus:outline-none focus:border-accent-blue focus:ring-1 focus:ring-accent-blue/50"
-              required
-              minLength={8}
-              disabled={isLoading}
-            />
-            <p className="text-xs text-muted-foreground">
-              At least 8 characters with uppercase, lowercase, and numbers
-            </p>
-          </div>
+                <div className="space-y-2">
+                  <Label htmlFor="full_name">
+                    Full Name <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    id="full_name"
+                    type="text"
+                    name="full_name"
+                    value={formData.full_name}
+                    onChange={handleChange}
+                    placeholder="John Doe"
+                    className={INPUT_CLASSNAME}
+                    required
+                    disabled={isLoading}
+                    autoComplete="name"
+                  />
+                </div>
 
-          {/* Confirm Password */}
-          <div className="space-y-2">
-            <label className="block text-sm font-medium">
-              Confirm Password <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="password"
-              name="confirmPassword"
-              value={formData.confirmPassword}
-              onChange={handleChange}
-              placeholder="••••••••"
-              className="w-full px-3 py-2 border border-border/40 rounded-lg bg-background focus:outline-none focus:border-accent-blue focus:ring-1 focus:ring-accent-blue/50"
-              required
-              minLength={8}
-              disabled={isLoading}
-            />
-          </div>
+                <div className="space-y-2">
+                  <Label htmlFor="email">
+                    Work Email <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    name="email"
+                    value={formData.email}
+                    onChange={handleChange}
+                    placeholder="you@organization.com"
+                    className={INPUT_CLASSNAME}
+                    required
+                    disabled={isLoading}
+                    autoComplete="email"
+                  />
+                </div>
 
-          {/* Organization */}
-          <div className="space-y-2">
-            <label className="block text-sm font-medium">
-              Organization <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              name="organization"
-              value={formData.organization}
-              onChange={handleChange}
-              placeholder="Your organization"
-              className="w-full px-3 py-2 border border-border/40 rounded-lg bg-background focus:outline-none focus:border-accent-blue focus:ring-1 focus:ring-accent-blue/50"
-              required
-              disabled={isLoading}
-            />
-          </div>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <Label htmlFor="password">
+                      Password <span className="text-red-500">*</span>
+                    </Label>
+                    <span className={cn("text-xs font-semibold", passwordStrength.textClass)}>
+                      {passwordStrength.label}
+                    </span>
+                  </div>
+                  <div className="relative">
+                    <Input
+                      id="password"
+                      type={showPassword ? "text" : "password"}
+                      name="password"
+                      value={formData.password}
+                      onChange={handleChange}
+                      placeholder="Create a secure password"
+                      className={cn(INPUT_CLASSNAME, "pr-12")}
+                      required
+                      minLength={8}
+                      disabled={isLoading}
+                      autoComplete="new-password"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      className="absolute inset-y-0 right-0 inline-flex items-center justify-center px-3 text-slate-500 transition-colors hover:text-slate-900"
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                      disabled={isLoading}
+                    >
+                      {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                    </button>
+                  </div>
+                  <Progress
+                    value={passwordStrength.progress}
+                    className={cn(
+                      "h-2 bg-slate-100 [&_[data-slot=progress-indicator]]:transition-transform",
+                      passwordStrength.indicatorClass,
+                    )}
+                  />
+                  <div className="grid gap-2 rounded-2xl border border-border/40 bg-background/40 p-3 sm:grid-cols-2">
+                    {PASSWORD_REQUIREMENTS.map((requirement) => {
+                      const isMet = passwordStrength.checks[requirement.key];
 
-          {/* County */}
-          <div className="space-y-2">
-            <label className="block text-sm font-medium">County</label>
-            <select
-              name="county"
-              value={formData.county}
-              onChange={handleChange}
-              className="w-full px-3 py-2 border border-border/40 rounded-lg bg-background focus:outline-none focus:border-accent-blue focus:ring-1 focus:ring-accent-blue/50"
-              disabled={isLoading}
-            >
-              <option value="">Select a county (optional)</option>
-              {kenyanCounties.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          </div>
+                      return (
+                        <div
+                          key={requirement.key}
+                          className={cn(
+                            "flex items-center gap-2 text-xs transition-colors",
+                            isMet ? "text-emerald-400" : "text-muted-foreground",
+                          )}
+                        >
+                          <span
+                            className={cn(
+                              "flex size-4 items-center justify-center rounded-full border",
+                              isMet
+                                ? "border-emerald-500 bg-emerald-500/10"
+                                : "border-border/60 bg-transparent",
+                            )}
+                          >
+                            {isMet && <Check className="size-3" />}
+                          </span>
+                          <span>{requirement.label}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
 
-          {/* Phone */}
-          <div className="space-y-2">
-            <label className="block text-sm font-medium">Phone</label>
-            <input
-              type="tel"
-              name="phone"
-              value={formData.phone}
-              onChange={handleChange}
-              placeholder="+254 712 345 678 (optional)"
-              className="w-full px-3 py-2 border border-border/40 rounded-lg bg-background focus:outline-none focus:border-accent-blue focus:ring-1 focus:ring-accent-blue/50"
-              disabled={isLoading}
-            />
-          </div>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <Label htmlFor="confirmPassword">
+                      Confirm Password <span className="text-red-500">*</span>
+                    </Label>
+                    {confirmPasswordHasValue && (
+                      <span
+                        className={cn(
+                          "text-xs font-semibold",
+                          passwordsMatch ? "text-emerald-600" : "text-amber-500",
+                        )}
+                      >
+                        {passwordsMatch ? "Passwords match" : "Passwords do not match"}
+                      </span>
+                    )}
+                  </div>
+                  <div className="relative">
+                    <Input
+                      id="confirmPassword"
+                      type={showConfirmPassword ? "text" : "password"}
+                      name="confirmPassword"
+                      value={formData.confirmPassword}
+                      onChange={handleChange}
+                      placeholder="Re-enter your password"
+                      className={cn(INPUT_CLASSNAME, "pr-12")}
+                      required
+                      minLength={8}
+                      disabled={isLoading}
+                      autoComplete="new-password"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword((prev) => !prev)}
+                      className="absolute inset-y-0 right-0 inline-flex items-center justify-center px-3 text-slate-500 transition-colors hover:text-slate-900"
+                      aria-label={showConfirmPassword ? "Hide confirm password" : "Show confirm password"}
+                      disabled={isLoading}
+                    >
+                      {showConfirmPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                    </button>
+                  </div>
+                  {confirmPasswordHasValue && !passwordsMatch && (
+                    <p className="text-xs text-amber-600">
+                      Make sure both password fields are identical before submitting.
+                    </p>
+                  )}
+                </div>
 
-          <button
-            type="submit"
-            disabled={isLoading}
-            className="w-full py-2 bg-accent-blue text-white rounded-lg font-medium hover:bg-accent-blue/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {isLoading ? "Creating account..." : "Create Account"}
-          </button>
-        </form>
+                <div className="space-y-2">
+                  <Label htmlFor="organization">
+                    Organization <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    id="organization"
+                    type="text"
+                    name="organization"
+                    value={formData.organization}
+                    onChange={handleChange}
+                    placeholder="Kenya Meteorological Department"
+                    className={INPUT_CLASSNAME}
+                    required
+                    disabled={isLoading}
+                    autoComplete="organization"
+                  />
+                </div>
 
-        <p className="text-center text-sm text-muted-foreground mt-6">
-          Already have an account?{" "}
-          <Link
-            href="/sign-in"
-            className="text-accent-blue hover:underline font-medium"
-          >
-            Sign in
-          </Link>
-        </p>
+                <div className="grid gap-5 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="county">
+                      County <span className="text-red-500">*</span>
+                    </Label>
+                    <select
+                      id="county"
+                      name="county"
+                      value={formData.county}
+                      onChange={handleChange}
+                      className={SELECT_CLASSNAME}
+                      disabled={isLoading}
+                      required
+                    >
+                      <option value="" className="bg-white text-slate-500">
+                        Select county
+                      </option>
+                      {kenyanCounties.map((county) => (
+                        <option key={county} value={county} className="bg-white text-slate-950">
+                          {county}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="phone">
+                      Phone
+                    </Label>
+                    <Input
+                      id="phone"
+                      type="tel"
+                      name="phone"
+                      value={formData.phone}
+                      onChange={handleChange}
+                      placeholder="+254 712 345 678"
+                      className={INPUT_CLASSNAME}
+                      disabled={isLoading}
+                      autoComplete="tel"
+                    />
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-border/40 bg-background/40 p-4 text-xs leading-6 text-muted-foreground">
+                  Use a password unique to Clima Scope. County selection is required so the
+                  right location context, dashboard scope, and report workflow are attached to your account immediately.
+                </div>
+
+                <Button
+                  type="submit"
+                  disabled={isLoading}
+                  className="h-11 w-full rounded-xl bg-sky-600 text-white hover:bg-sky-700"
+                >
+                  {isLoading ? "Creating account..." : "Create Account"}
+                </Button>
+              </form>
+
+              <p className="mt-6 text-center text-sm text-muted-foreground">
+                Already have an account?{" "}
+                <Link href="/sign-in" className="font-semibold text-accent-blue transition-colors hover:text-accent-blue/80">
+                  Sign in
+                </Link>
+              </p>
+            </div>
+          </section>
+        </div>
       </div>
     </div>
   );

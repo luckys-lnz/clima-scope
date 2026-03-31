@@ -247,7 +247,7 @@ export default function Dashboard() {
                 )
               })}
               <Link
-                href="/pricing"
+                href="/#pricing"
                 className="w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50"
                 onClick={() => setSidebarOpen(false)}
               >

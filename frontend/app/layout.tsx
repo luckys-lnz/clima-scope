@@ -7,6 +7,10 @@ export const metadata: Metadata = {
   title: "Weather Reporting System - Kenya County Forecasts",
   description:
     "Automated weekly county-level weather reporting using GFS 7-day forecast data",
+  icons: {
+    icon: "/favico.png",
+    shortcut: "/favico.png",
+  },
 };
 
 export const viewport: Viewport = {
