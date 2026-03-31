@@ -20,7 +20,7 @@ export default function Home() {
           </div>
           <div className="flex items-center gap-4">
             <Link
-              href="/#pricing"
+              href="#pricing"
               className="px-4 py-2 text-sm font-medium rounded-lg hover:bg-secondary transition-colors transition-transform duration-200 hover:-translate-y-0.5 active:translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
               Pricing
