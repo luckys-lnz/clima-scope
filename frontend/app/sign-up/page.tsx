@@ -1,13 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   AlertCircle,
+  ArrowLeft,
   Check,
   CheckCircle,
-  Cloud,
   Eye,
   EyeOff,
   FileText,
@@ -22,6 +22,9 @@ import { Progress } from "@/components/ui/progress";
 import { authService } from "@/lib/services/authService";
 import { cn } from "@/lib/utils";
 import type { SignUpData } from "@/lib/models/auth";
+
+import type { Session as SupabaseSession } from "@supabase/auth-js";
+import { supabase } from "@/lib/supabaseClient";
 
 const INPUT_CLASSNAME =
   "h-11 rounded-xl border border-slate-300 bg-white shadow-sm caret-slate-900 focus-visible:bg-white focus-visible:border-sky-600 focus-visible:ring-2 focus-visible:ring-sky-500/40";
@@ -122,6 +125,53 @@ export default function SignUp() {
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const syncOAuthSession = async (session?: SupabaseSession | null) => {
+    if (!session || authService.hasStoredSession()) {
+      return;
+    }
+
+    try {
+      await authService.initializeSessionFromOAuth(session);
+      router.replace("/dashboard");
+    } catch (err) {
+      console.error("OAuth session initialization failed:", err);
+    }
+  };
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const checkStoredSession = async () => {
+      if (!isMounted || authService.hasStoredSession()) {
+        return;
+      }
+
+      const { data, error } = await supabase.auth.getSession();
+      if (error) {
+        console.error("Failed to read OAuth session:", error);
+        return;
+      }
+
+      if (data?.session) {
+        await syncOAuthSession(data.session);
+      }
+    };
+
+    void checkStoredSession();
+
+    const { data: listener } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        if (event === "SIGNED_IN") {
+          void syncOAuthSession(session);
+        }
+      },
+    );
+
+    return () => {
+      isMounted = false;
+      listener?.subscription.unsubscribe();
+    };
+  }, [router]);
 
   const passwordStrength = getPasswordStrength(formData.password);
   const passwordsMatch =
@@ -236,6 +286,31 @@ export default function SignUp() {
     }
   };
 
+  const handleGoogleSignUp = async () => {
+    if (isLoading) return;
+
+    setError("");
+    setIsLoading(true);
+
+    try {
+      if (typeof window === "undefined") {
+        throw new Error("Unable to start Google sign-up");
+      }
+
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: `${window.location.origin}/sign-up`,
+        },
+      });
+
+      if (error) throw error;
+    } catch (err: any) {
+      setError(err.message || "Unable to continue with Google. Please try again.");
+      setIsLoading(false);
+    }
+  };
+
   const kenyanCounties = [
     "Mombasa",
     "Kwale",
@@ -292,12 +367,21 @@ export default function SignUp() {
         <div className="grid w-full overflow-hidden rounded-[28px] border border-border/40 bg-card shadow-[0_32px_120px_rgba(0,0,0,0.45)] lg:grid-cols-[1.1fr_0.9fr]">
           <section className="relative overflow-hidden border-b border-border/40 bg-secondary/30 px-7 py-8 sm:px-9 lg:border-b-0 lg:border-r lg:px-12 lg:py-12">
             <div className="relative z-10">
-              <Link
-                href="/"
-                className="inline-flex items-center gap-2 text-sm font-medium transition-opacity hover:opacity-80"
-              >
-                <span className="text-lg font-semibold tracking-wide">Clima Scope</span>
-              </Link>
+              <div className="relative flex items-center justify-center">
+                <Link
+                  href="/sign-in"
+                  className="absolute left-0 inline-flex items-center gap-1 text-sm font-semibold text-sky-600 transition-colors hover:text-sky-700"
+                >
+                  <ArrowLeft className="size-4" />
+                  Back to login
+                </Link>
+                <Link
+                  href="/"
+                  className="text-lg font-semibold tracking-wide"
+                >
+                  Clima Scope
+                </Link>
+              </div>
 
               <div className="mt-10 max-w-lg space-y-5">
                 <p className="text-xs font-semibold uppercase tracking-[0.28em] text-accent-blue">
@@ -352,11 +436,28 @@ export default function SignUp() {
 
           <section className="bg-card px-6 py-8 sm:px-8 lg:px-10 lg:py-12">
             <div className="mx-auto w-full max-w-md">
-              <div className="mb-8">
-                <h2 className="text-3xl font-semibold tracking-tight">Create your workspace</h2>
-                <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                  Use your work details so county dashboards, reporting workflows, and forecast operations are configured correctly.
-                </p>
+              <div className="mb-8 flex items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-3xl font-semibold tracking-tight">Create your workspace</h2>
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                    Use your work details so county dashboards, reporting workflows, and forecast operations are configured correctly.
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <Button
+                  type="button"
+                  className="h-11 w-full rounded-xl border border-sky-600 bg-transparent text-sky-600 transition hover:bg-sky-600 hover:text-white"
+                  onClick={handleGoogleSignUp}
+                  disabled={isLoading}
+                >
+                  Continue with Google
+                </Button>
+                <div className="relative flex items-center justify-center text-xs text-muted-foreground">
+                  <span className="absolute inset-x-0 h-px bg-border/60" />
+                  <span className="bg-card px-3 text-sm">or continue with email</span>
+                </div>
               </div>
 
               <form onSubmit={handleSubmit} className="space-y-5">

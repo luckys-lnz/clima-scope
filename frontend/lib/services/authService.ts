@@ -1,5 +1,6 @@
 "use client"
 
+import type { Session as SupabaseSession } from "@supabase/auth-js"
 import type { LoginData, SignUpData, User } from "@/lib/models/auth"
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
@@ -110,6 +111,8 @@ const getStoredAccessToken = (): string | null =>
   typeof window === "undefined"
     ? null
     : localStorage.getItem(STORAGE_KEYS.accessToken)
+
+const hasStoredTokens = (): boolean => Boolean(getStoredAccessToken())
 
 const getStoredRefreshToken = (): string | null =>
   typeof window === "undefined"
@@ -312,6 +315,35 @@ export const authService = {
         user,
       })
     }
+    return user
+  },
+
+  hasStoredSession(): boolean {
+    return hasStoredTokens()
+  },
+
+  async initializeSessionFromOAuth(session: SupabaseSession): Promise<User> {
+    if (!session?.access_token || !session?.refresh_token) {
+      throw new Error("OAuth session is missing tokens")
+    }
+
+    const response = await fetch(`${API_BASE}/api/v1/auth/me`, {
+      method: "GET",
+      headers: withAuthorizationHeader(
+        session.access_token,
+        createJsonHeaders(),
+      ),
+    })
+
+    if (!response.ok) {
+      throw new Error(
+        await getErrorMessage(response, "Failed to load user profile"),
+      )
+    }
+
+    const user = (await response.json()) as User
+    setSession(session.access_token, session.refresh_token, user)
+    clearCacheEntries([DASHBOARD_CACHE_KEY, REPORTS_CACHE_KEY, SETTINGS_CACHE_KEY])
     return user
   },
 

@@ -1,9 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { AlertCircle, Cloud, Eye, EyeOff } from "lucide-react";
+import { AlertCircle, Eye, EyeOff } from "lucide-react";
+
+import type { Session as SupabaseSession } from "@supabase/auth-js";
+import { supabase } from "@/lib/supabaseClient";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,7 +18,7 @@ import type { LoginData } from "@/lib/models/auth";
 const INPUT_CLASSNAME =
   "h-11 rounded-xl border border-slate-300 bg-white shadow-sm caret-slate-900 focus-visible:bg-white focus-visible:border-sky-600 focus-visible:ring-2 focus-visible:ring-sky-500/40";
 
-  export default function SignIn() {
+export default function SignIn() {
   const router = useRouter();
   const [formData, setFormData] = useState<LoginData>({
     email: "",
@@ -63,6 +66,79 @@ const INPUT_CLASSNAME =
     }
   };
 
+  const syncOAuthSession = async (session?: SupabaseSession | null) => {
+    if (!session || authService.hasStoredSession()) {
+      return;
+    }
+
+    try {
+      await authService.initializeSessionFromOAuth(session);
+      router.replace("/dashboard");
+    } catch (err) {
+      console.error("OAuth session initialization failed:", err);
+    }
+  };
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const checkStoredSession = async () => {
+      if (!isMounted || authService.hasStoredSession()) {
+        return;
+      }
+
+      const { data, error } = await supabase.auth.getSession();
+      if (error) {
+        console.error("Failed to read OAuth session:", error);
+        return;
+      }
+
+      if (data?.session) {
+        void syncOAuthSession(data.session);
+      }
+    };
+
+    void checkStoredSession();
+
+    const { data: listener } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        if (event === "SIGNED_IN") {
+          void syncOAuthSession(session);
+        }
+      },
+    );
+
+    return () => {
+      isMounted = false;
+      listener?.subscription.unsubscribe();
+    };
+  }, [router]);
+
+  const handleGoogleSignIn = async () => {
+    if (isLoading) return;
+
+    setError("");
+    setIsLoading(true);
+
+    try {
+      if (typeof window === "undefined") {
+        throw new Error("Unable to start Google sign-in");
+      }
+
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: `${window.location.origin}/sign-in`,
+        },
+      });
+
+      if (error) throw error;
+    } catch (err: any) {
+      setError(err.message || "Unable to sign in with Google. Please try again.");
+      setIsLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <div className="mx-auto flex min-h-screen max-w-7xl items-center justify-center px-4 py-10">
@@ -86,6 +162,20 @@ const INPUT_CLASSNAME =
           </div>
 
           <section className="rounded-[28px] border border-border/40 bg-card px-6 py-8 shadow-[0_24px_80px_rgba(0,0,0,0.45)] sm:px-8">
+            <div className="space-y-4">
+              <Button
+                type="button"
+                className="h-11 w-full rounded-xl border border-sky-600 bg-transparent text-sky-600 transition hover:bg-sky-600 hover:text-white"
+                onClick={handleGoogleSignIn}
+                disabled={isLoading}
+              >
+                Sign in with Google
+              </Button>
+              <div className="relative flex items-center justify-center text-sm text-muted-foreground">
+                <span className="absolute inset-x-0 h-px bg-border/60" />
+                <span className="bg-card px-3 text-sm">or continue with email</span>
+              </div>
+            </div>
             <form onSubmit={handleSubmit} className="space-y-5">
               {error && (
                 <div className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 p-4">
