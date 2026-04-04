@@ -297,9 +297,8 @@ export default function Dashboard() {
               sidebarOpen ? "translate-x-0" : "-translate-x-full"
             }`}
           >
-            <div className="flex items-center gap-3 px-6 py-6 border-b border-border">
-              <MapPin className="w-6 h-6 text-primary" />
-              <div>
+            <div className="px-6 py-6 border-b border-border">
+              <div className="space-y-2">
                 <Image
                   src="/logo.png"
                   alt="Clima Scope"
@@ -308,9 +307,10 @@ export default function Dashboard() {
                   className="h-8 w-auto brightness-0 invert"
                   priority
                 />
-                <p className="text-xs text-muted-foreground">
-                  {sessionUser?.county || "—"} County
-                </p>
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <MapPin className="h-3.5 w-3.5 text-primary/80" />
+                  <span>{sessionUser?.county || "—"} County</span>
+                </div>
               </div>
             </div>
 
@@ -331,7 +331,7 @@ export default function Dashboard() {
                         : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                     }`}
                   >
-                    <Icon className="w-5 h-5" />
+                    <Icon className="w-4 h-4" />
                     <span>{item.label}</span>
                   </button>
                 );
@@ -342,7 +342,7 @@ export default function Dashboard() {
                 className="w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50"
                 onClick={() => setSidebarOpen(false)}
               >
-                <CreditCard className="w-5 h-5" />
+                <CreditCard className="w-4 h-4" />
                 <span>Pricing</span>
               </Link>
 
@@ -351,7 +351,7 @@ export default function Dashboard() {
                 className="w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50"
                 onClick={() => setSidebarOpen(false)}
               >
-                <BarChart3 className="w-5 h-5" />
+                <BarChart3 className="w-4 h-4" />
                 <span>Usage Limits</span>
               </Link>
             </nav>
