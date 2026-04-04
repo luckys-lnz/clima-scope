@@ -1,6 +1,7 @@
 "use client";
 import type { Session as SupabaseSession } from "@supabase/auth-js";
 import Link from "next/link";
+import Image from "next/image";
 import {
   useCallback,
   useEffect,
@@ -299,7 +300,14 @@ export default function Dashboard() {
             <div className="flex items-center gap-3 px-6 py-6 border-b border-border">
               <MapPin className="w-6 h-6 text-primary" />
               <div>
-                <h1 className="font-bold text-lg">Clima Scope</h1>
+                <Image
+                  src="/logo.png"
+                  alt="Clima Scope"
+                  width={180}
+                  height={52}
+                  className="h-8 w-auto brightness-0 invert"
+                  priority
+                />
                 <p className="text-xs text-muted-foreground">
                   {sessionUser?.county || "—"} County
                 </p>
