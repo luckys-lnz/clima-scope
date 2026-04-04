@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
-import { AlertCircle, Eye, EyeOff } from "lucide-react";
+import { AlertCircle, ArrowLeft, Eye, EyeOff } from "lucide-react";
 
 import type { Session as SupabaseSession } from "@supabase/auth-js";
 import { supabase } from "@/lib/supabaseClient";
@@ -146,6 +146,14 @@ export default function SignIn() {
     <div className="min-h-screen bg-background text-foreground">
       <div className="mx-auto flex min-h-screen max-w-7xl items-center justify-center px-4 py-10">
         <div className="w-full max-w-md">
+          <Link
+            href="/"
+            className="mb-6 inline-flex items-center gap-2 text-sm font-medium text-sky-600 transition-colors hover:text-sky-700"
+            aria-label="Back to landing page"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back
+          </Link>
           <div className="mb-8 text-center">
             <Link
               href="/"
