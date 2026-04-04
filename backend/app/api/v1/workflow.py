@@ -35,6 +35,7 @@ from app.services.open_meteo_service import (
     fetch_daily_forecast,
     centroid_from_rows,
 )
+from app.services.profile_service import fetch_profile_for_user
 from app.services.station_data_service import (
     fetch_aggregated_station_csv_bytes,
     fetch_open_meteo_two_week_observations_csv,
@@ -734,20 +735,12 @@ def _load_observation_bytes_with_fallback(
     return payload
 
 
-def _get_user_county(supabase, user_id: str, fallback: str = "Unknown") -> str:
-    try:
-        profile = (
-            supabase.table("profiles")
-            .select("county")
-            .eq("id", user_id)
-            .limit(1)
-            .execute()
-        )
-        rows = profile.data or []
-        county = (rows[0].get("county") if rows else None) or fallback
+def _get_user_county(supabase, user, fallback: str = "Unknown") -> str:
+    profile = fetch_profile_for_user(supabase, user)
+    county = profile.get("county") if profile else None
+    if county:
         return str(county)
-    except Exception:
-        return fallback
+    return fallback
 
 
 def _is_missing_column_error(exc: Exception, column_name: str) -> bool:
@@ -1116,7 +1109,7 @@ async def validate_inputs(
     print("-"*40)
 
     try:
-        user_county = _get_user_county(supabase_admin, user_id=user_id, fallback="Unknown")
+        user_county = _get_user_county(supabase_admin, user, fallback="Unknown")
         obs_payload = _load_observation_bytes_with_fallback(
             supabase=supabase_admin,
             user_id=user_id,
@@ -1438,7 +1431,7 @@ async def generate_maps(
     county_for_fetch = (
         request.county
         if request.county and request.county != "—"
-        else _get_user_county(supabase_admin, user_id=user_id, fallback="Unknown")
+        else _get_user_county(supabase_admin, user, fallback="Unknown")
     )
     resolved_map_csv_bytes: Optional[bytes] = None
     try:
@@ -1887,15 +1880,11 @@ async def generate_report(
             "in_progress",
             "Checking required profile details for report generation",
         )
-        profile_response = (
-            supabase_admin.table("profiles")
-            .select("*")
-            .eq("id", user_id)
-            .limit(1)
-            .execute()
+        profile = fetch_profile_for_user(
+            supabase_admin,
+            user,
+            raise_on_error=True,
         )
-        if profile_response.data:
-            profile = profile_response.data[0]
     except Exception as e:
         print(f"⚠️ Failed to fetch profile for report details validation: {e}")
         add_stage(

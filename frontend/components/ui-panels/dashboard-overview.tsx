@@ -25,6 +25,24 @@ const REPORT_JOB_ACTIVE_KEY = "report_job_active"
 export function DashboardOverview({
   onNavigate,
 }: DashboardOverviewProps) {
+  const fallbackData: DashboardOverviewData = {
+    stats: {
+      countiesProcessed: 0,
+      totalCounties: 47,
+      allReportsDone: 0,
+      lastGeneration: "",
+      userReportsGenerated: 0,
+    },
+    workflow_step: null,
+    current_window: {
+      week: 0,
+      year: new Date().getFullYear(),
+      start: "",
+      end: "",
+    },
+    workflow_progress: null,
+  }
+
   const getCachedData = (): DashboardOverviewData | null => {
     if (typeof window === "undefined") return null
     try {
@@ -110,16 +128,20 @@ export function DashboardOverview({
       </div>
     )
   }
-  if (error || !data) return <div className="p-6 text-red-500">{error || "No data"}</div>
 
-  const { stats, workflow_step, workflow_progress: workflowProgress } = data
+  const resolvedData = data ?? fallbackData
+
+  const { stats, workflow_step, workflow_progress: workflowProgress } = resolvedData
   if (typeof window !== "undefined") {
     const latestStatus = String(workflowProgress?.status || "").toLowerCase()
     if (workflow_step === "completed" || latestStatus === "error" || latestStatus === "failed") {
       sessionStorage.setItem(REPORT_JOB_ACTIVE_KEY, "false")
     }
   }
-  const currentWindowText = `Week ${data.current_window.week}, ${data.current_window.year} (${data.current_window.start} to ${data.current_window.end})`
+  const hasWindow = Boolean(resolvedData.current_window.start && resolvedData.current_window.end)
+  const currentWindowText = hasWindow
+    ? `Week ${resolvedData.current_window.week}, ${resolvedData.current_window.year} (${resolvedData.current_window.start} to ${resolvedData.current_window.end})`
+    : "Current reporting window is being prepared."
 
   const steps = [
     { key: "uploaded", label: "Historical Station Data" },
@@ -143,6 +165,11 @@ export function DashboardOverview({
 
   return (
     <div className="p-6 space-y-6">
+      {error && (
+        <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
       {/* Alerts */}
       <div className="space-y-3">
         <AlertCard

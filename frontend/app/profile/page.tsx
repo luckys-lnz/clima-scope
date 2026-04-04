@@ -155,7 +155,9 @@ export default function ProfilePage() {
 
           {/* Prefix */}
           <div className="space-y-2">
-            <label className="block text-sm font-medium">Title</label>
+            <label className="block text-sm font-medium">
+              Title <span className="text-red-500">*</span>
+            </label>
 
             <select
               name="title"
@@ -175,7 +177,9 @@ export default function ProfilePage() {
 
           {/* Full Name */}
           <div className="space-y-2">
-            <label className="block text-sm font-medium">Full Name</label>
+            <label className="block text-sm font-medium">
+              Full Name <span className="text-red-500">*</span>
+            </label>
 
             <input
               type="text"
@@ -190,7 +194,9 @@ export default function ProfilePage() {
 
           {/* Job Title */}
           <div className="space-y-2">
-            <label className="block text-sm font-medium">Job Title</label>
+            <label className="block text-sm font-medium">
+              Job Title <span className="text-red-500">*</span>
+            </label>
 
             <input
               type="text"
@@ -206,7 +212,9 @@ export default function ProfilePage() {
           {/* Phone & County */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <label className="block text-sm font-medium">Phone</label>
+              <label className="block text-sm font-medium">
+                Phone <span className="text-red-500">*</span>
+              </label>
 
               <input
                 type="tel"
@@ -220,7 +228,9 @@ export default function ProfilePage() {
             </div>
 
             <div className="space-y-2">
-              <label className="block text-sm font-medium">County</label>
+            <label className="block text-sm font-medium">
+              County <span className="text-red-500">*</span>
+            </label>
 
               <input
                 type="text"
@@ -238,7 +248,7 @@ export default function ProfilePage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <label className="block text-sm font-medium">
-                Personal Email
+                Personal Email <span className="text-red-500">*</span>
               </label>
 
               <input
@@ -253,7 +263,9 @@ export default function ProfilePage() {
             </div>
 
             <div className="space-y-2">
-              <label className="block text-sm font-medium">Work Email</label>
+              <label className="block text-sm font-medium">
+                Work Email <span className="text-red-500">*</span>
+              </label>
 
               <input
                 type="email"
@@ -269,7 +281,9 @@ export default function ProfilePage() {
 
           {/* Station Name */}
           <div className="space-y-2">
-            <label className="block text-sm font-medium">Station Name</label>
+            <label className="block text-sm font-medium">
+              Station Name <span className="text-red-500">*</span>
+            </label>
 
             <input
               type="text"
@@ -285,7 +299,7 @@ export default function ProfilePage() {
           {/* Station Address */}
           <div className="space-y-2">
             <label className="block text-sm font-medium">
-              Station Address
+              Station Address <span className="text-red-500">*</span>
             </label>
 
             <input

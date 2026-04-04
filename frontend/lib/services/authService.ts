@@ -2,6 +2,7 @@
 
 import type { Session as SupabaseSession } from "@supabase/auth-js"
 import type { LoginData, SignUpData, User } from "@/lib/models/auth"
+import { supabase } from "@/lib/supabaseClient"
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 const DASHBOARD_CACHE_KEY = "dashboard_overview_cache_v1"
@@ -112,7 +113,12 @@ const getStoredAccessToken = (): string | null =>
     ? null
     : localStorage.getItem(STORAGE_KEYS.accessToken)
 
-const hasStoredTokens = (): boolean => Boolean(getStoredAccessToken())
+const hasStoredTokens = (): boolean => {
+  const accessToken = getStoredAccessToken()
+  const refreshToken = getStoredRefreshToken()
+  if (!accessToken || !refreshToken) return false
+  return !isTokenExpired(accessToken, TOKEN_REFRESH_LEEWAY_MS)
+}
 
 const getStoredRefreshToken = (): string | null =>
   typeof window === "undefined"
@@ -378,33 +384,58 @@ export const authService = {
   async getSession(): Promise<Session | null> {
     const refreshToken = getStoredRefreshToken()
 
-    if (!refreshToken) {
+    if (refreshToken) {
+      try {
+        const accessToken = await authService.getValidAccessToken()
+        let user = getStoredUser()
+
+        // Recover session identity even if localStorage user payload is missing/stale.
+        if (!user) {
+          user = await authService.getCurrentUser(accessToken)
+        }
+
+        if (!user) {
+          authService.clearSession("expired")
+        } else {
+          return {
+            user,
+            access_token: accessToken,
+            refresh_token: getStoredRefreshToken() ?? refreshToken,
+          }
+        }
+      } catch {
+        authService.clearSession("expired")
+      }
+    }
+
+    if (typeof window === "undefined") {
       return null
     }
 
     try {
-      const accessToken = await authService.getValidAccessToken()
-      let user = getStoredUser()
-
-      // Recover session identity even if localStorage user payload is missing/stale.
-      if (!user) {
-        user = await authService.getCurrentUser(accessToken)
-      }
-
-      if (!user) {
-        authService.clearSession("expired")
+      const { data, error } = await supabase.auth.getSession()
+      if (error || !data?.session) {
         return null
       }
 
-      return {
-        user,
-        access_token: accessToken,
-        refresh_token: getStoredRefreshToken() ?? refreshToken,
+      await authService.initializeSessionFromOAuth(data.session)
+
+      const accessToken = getStoredAccessToken()
+      const storedRefreshToken = getStoredRefreshToken()
+      const user = getStoredUser()
+
+      if (accessToken && storedRefreshToken && user) {
+        return {
+          user,
+          access_token: accessToken,
+          refresh_token: storedRefreshToken,
+        }
       }
-    } catch {
-      authService.clearSession("expired")
-      return null
+    } catch (error) {
+      console.error("Failed to initialize OAuth session:", error)
     }
+
+    return null
   },
 
   async getValidAccessToken(
@@ -413,7 +444,7 @@ export const authService = {
   ): Promise<string> {
     const { forceRefresh = false } = options
     const storedAccessToken = getStoredAccessToken()
-    const accessToken = storedAccessToken ?? token ?? null
+    const accessToken = token ?? storedAccessToken ?? null
 
     if (
       accessToken &&
@@ -428,8 +459,22 @@ export const authService = {
       throw new Error("Session expired. Please sign in again.")
     }
 
-    const refreshed = await refreshWithToken(refreshToken)
-    return refreshed.access_token
+    try {
+      const refreshed = await refreshWithToken(refreshToken)
+      return refreshed.access_token
+    } catch {
+      if (typeof window !== "undefined") {
+        const { data, error } = await supabase.auth.getSession()
+        if (!error && data?.session) {
+          await authService.initializeSessionFromOAuth(data.session)
+          const recoveredAccessToken = getStoredAccessToken()
+          if (recoveredAccessToken) {
+            return recoveredAccessToken
+          }
+        }
+      }
+      throw new Error("Session expired. Please sign in again.")
+    }
   },
 
   async fetchWithAuth(

@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { authService } from "@/lib/services/authService";
 import { cn } from "@/lib/utils";
 import type { LoginData } from "@/lib/models/auth";
+import { GoogleLogo } from "@/components/icons/google-logo";
 
 const INPUT_CLASSNAME =
   "h-11 rounded-xl border border-slate-300 bg-white shadow-sm caret-slate-900 focus-visible:bg-white focus-visible:border-sky-600 focus-visible:ring-2 focus-visible:ring-sky-500/40";
@@ -128,7 +129,7 @@ export default function SignIn() {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: `${window.location.origin}/sign-in`,
+          redirectTo: `${window.location.origin}/dashboard`,
         },
       });
 
@@ -169,7 +170,10 @@ export default function SignIn() {
                 onClick={handleGoogleSignIn}
                 disabled={isLoading}
               >
-                Sign in with Google
+                <span className="flex items-center justify-center gap-2">
+                  <GoogleLogo />
+                  Sign in with Google
+                </span>
               </Button>
               <div className="relative flex items-center justify-center text-sm text-muted-foreground">
                 <span className="absolute inset-x-0 h-px bg-border/60" />
