@@ -3,8 +3,9 @@ from datetime import datetime
 from typing import Optional
 
 from app.api.v1.auth import get_current_user
-from app.core.supabase import get_supabase_anon
+from app.core.supabase import get_supabase_admin, get_supabase_anon
 from app.schemas.dashboard import DashboardOverviewResponse
+from app.services.profile_service import fetch_profile_for_user
 from app.utils.report_date import get_current_weekly_report_window
 
 router = APIRouter(tags=["dashboard"])
@@ -13,6 +14,7 @@ router = APIRouter(tags=["dashboard"])
 @router.get("/overview", response_model=DashboardOverviewResponse)
 async def get_dashboard_overview(user=Depends(get_current_user)):
     supabase = get_supabase_anon()
+    supabase_admin = get_supabase_admin()
 
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
@@ -24,16 +26,8 @@ async def get_dashboard_overview(user=Depends(get_current_user)):
     # --------------------------------------------------
     # USER COUNTY
     # --------------------------------------------------
-    try:
-        profile_response = supabase.table("profiles")\
-            .select("county")\
-            .eq("id", user_id)\
-            .execute()
-        
-        county = profile_response.data[0]["county"] if profile_response.data else None
-    except Exception as e:
-        print(f"Error fetching user county: {e}")
-        county = None
+    profile = fetch_profile_for_user(supabase_admin, user)
+    county = profile.get("county") if profile else None
 
     # --------------------------------------------------
     # USER REPORTS

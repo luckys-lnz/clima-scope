@@ -10,10 +10,11 @@ import pandas as pd
 
 from app.schemas.report import ReportArchiveItem
 from app.api.v1.auth import get_current_user
-from app.core.supabase import get_supabase_anon
+from app.core.supabase import get_supabase_admin, get_supabase_anon
 from app.core.config import settings
 from app.services.narration_service import summarize_observation_data, generate_report_narration
 from app.services.open_meteo_service import fetch_daily_forecast, centroid_from_rows
+from app.services.profile_service import fetch_profile_for_user
 
 router = APIRouter(tags=["reports"])
 
@@ -165,19 +166,11 @@ async def get_user_reports(user=Depends(get_current_user)):
     Return list of reports for the current user
     """
     supabase = get_supabase_anon()
+    supabase_admin = get_supabase_admin()
     user_id = user.id if hasattr(user, "id") else user.get("id")
 
-    # ---- get user county ----
-    try:
-        profile_response = supabase.table("profiles")\
-            .select("county")\
-            .eq("id", user_id)\
-            .execute()
-        
-        county = profile_response.data[0]["county"] if profile_response.data else "Unknown"
-    except Exception as e:
-        print(f"Error fetching user county: {e}")
-        county = "Unknown"
+    profile = fetch_profile_for_user(supabase_admin, user)
+    county = profile.get("county") or "Unknown"
 
     # ---- get user's reports ----
     try:
@@ -231,6 +224,7 @@ async def get_report_detail(report_id: UUID, user=Depends(get_current_user)):
     Return dynamic detail payload for a specific generated report.
     """
     supabase = get_supabase_anon()
+    supabase_admin = get_supabase_admin()
     user_id = user.id if hasattr(user, "id") else user.get("id")
 
     try:
@@ -347,19 +341,9 @@ async def get_report_detail(report_id: UUID, user=Depends(get_current_user)):
 
     # Resolve county for centroid fallback and narration context.
     county_name = "County"
-    try:
-        profile_response = (
-            supabase.table("profiles")
-            .select("county")
-            .eq("id", user_id)
-            .limit(1)
-            .execute()
-        )
-        rows = profile_response.data or []
-        if rows and rows[0].get("county"):
-            county_name = str(rows[0]["county"])
-    except Exception:
-        pass
+    profile = fetch_profile_for_user(supabase_admin, user)
+    if profile.get("county"):
+        county_name = str(profile["county"])
 
     # Open-Meteo forecast summary fallback for missing observation variables.
     # Skip recomputation when an immutable snapshot exists.

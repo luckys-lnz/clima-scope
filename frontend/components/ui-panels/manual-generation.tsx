@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import Link from "next/link"
 import { ChevronLeft, Download, RefreshCw } from "lucide-react"
 import { motion } from "framer-motion"
 import { LogViewer } from "@/components/log-viewer"
@@ -12,12 +13,53 @@ import { authService } from "@/lib/services/authService"
 import { workflowService } from "@/lib/services/workflowService"
 import { ReportService } from "@/lib/services/reportService"
 import type { ValidationResponse, MapOutput } from "@/lib/models/workflow"
+import type { User } from "@/lib/models/auth"
+import { useRouter } from "next/navigation"
 
 interface ManualGenerationProps {
   onBack: () => void
 }
 
 const REPORT_JOB_ACTIVE_KEY = "report_job_active"
+const PROFILE_REDIRECT_DELAY_MS = 3200 as const
+
+const isBlank = (value?: string | null): boolean => {
+  if (value === null || value === undefined) return true
+  if (typeof value === "string") {
+    return value.trim().length === 0
+  }
+  return false
+}
+
+const getPersonalEmail = (user: User | null): string | undefined => {
+  if (!user?.email) {
+    return undefined
+  }
+
+  const trimmed = user.email.trim()
+  return trimmed ? trimmed : undefined
+}
+
+const getMissingProfileFields = (user: User | null): string[] => {
+  const personalEmail = getPersonalEmail(user)
+  const workEmail = user?.signoff_email
+
+  const required = [
+    ["Title", user?.prefix || user?.title],
+    ["Full Name", user?.full_name],
+    ["Job Title", user?.job_title || user?.title],
+    ["Phone", user?.phone],
+    ["County", user?.county],
+    ["Personal Email", personalEmail],
+    ["Work Email", workEmail],
+    ["Station Name", user?.station_name],
+    ["Station Address", user?.station_address],
+  ]
+
+  return required
+    .filter(([, value]) => isBlank(value))
+    .map(([label]) => label)
+}
 
 const getErrorMessage = (error: unknown, fallback: string): string => {
   if (error instanceof Error && error.message) return error.message
@@ -43,9 +85,15 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
   const [downloadReportId, setDownloadReportId] = useState("")
   const [errorMessage, setErrorMessage] = useState("")
   const [sessionToken, setSessionToken] = useState<string | null>(null)
+  const [profileUser, setProfileUser] = useState<User | null>(null)
+  const [missingProfileFields, setMissingProfileFields] = useState<string[]>([])
+  const profileRedirectRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const reportPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const router = useRouter()
 
   const reportWindow = getCurrentWeeklyReportWindow()
+  const countyLabel = userCounty.trim()
+  const isCountyMissing = !countyLabel
 
   // ===== HELPER: Format date to ISO string (YYYY-MM-DD) =====
   const formatDateToISO = (date: Date): string => {
@@ -53,19 +101,48 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
   }
 
   useEffect(() => {
-    authService.getSession().then((session) => {
+    let isMounted = true
+
+    const loadSession = async () => {
+      const session = await authService.getSession()
+      if (!isMounted) return
+
       if (session?.user) {
         setUserCounty(session.user.county || "")
         setSessionToken(session.access_token)
+        setProfileUser(session.user)
+
+        try {
+          const refreshed = await authService.getCurrentUser(session.access_token)
+          if (!isMounted) return
+          setProfileUser(refreshed)
+        } catch (err) {
+          console.error("Failed to refresh profile data:", err)
+        }
       }
-    })
+    }
+
+    void loadSession()
     return () => {
       if (reportPollRef.current) {
         clearInterval(reportPollRef.current)
         reportPollRef.current = null
       }
+      if (profileRedirectRef.current) {
+        clearTimeout(profileRedirectRef.current)
+        profileRedirectRef.current = null
+      }
     }
   }, [])
+
+  useEffect(() => {
+    if (!profileUser) {
+      setMissingProfileFields([])
+      return
+    }
+
+    setMissingProfileFields(getMissingProfileFields(profileUser))
+  }, [profileUser])
 
   // ===== LOG HELPER =====
   const addLog = (msg: string) => {
@@ -79,6 +156,20 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
   const handleValidate = async () => {
     if (!sessionToken) {
       setErrorMessage("No active session")
+      return
+    }
+    if (missingProfileFields.length > 0) {
+      const fieldList = missingProfileFields.join(", ")
+      const profileError =
+        `Complete your profile (${fieldList}) before generating a report. Redirecting you to the profile page...`
+      addLog(`✗ Validation blocked: ${profileError}`)
+      setErrorMessage(profileError)
+      if (profileRedirectRef.current) {
+        clearTimeout(profileRedirectRef.current)
+      }
+      profileRedirectRef.current = setTimeout(() => {
+        router.push("/profile")
+      }, PROFILE_REDIRECT_DELAY_MS)
       return
     }
 
@@ -173,6 +264,14 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
       const errorMsg = !sessionToken ? "No active session" : "No active reporting period"
       addLog(`✗ Report generation blocked: ${errorMsg}`)
       setErrorMessage(errorMsg)
+      return
+    }
+
+    if (isCountyMissing) {
+      const countyErrorMsg =
+        "County information is missing from your profile. Update it before generating the report."
+      addLog(`✗ Report generation blocked: ${countyErrorMsg}`)
+      setErrorMessage(countyErrorMsg)
       return
     }
 
@@ -330,19 +429,37 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
             {/* STEP 1: PREPARE INPUTS */}
             {step === 1 && (
               <>
-                <div>
-                  <label className="text-xs font-medium">County</label>
-                  <div className="bg-muted border rounded-lg px-3 py-2 text-sm">
-                    {userCounty || "—"}
+                <div className="space-y-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium">County</label>
+                    <div className="bg-muted border rounded-lg px-3 py-2 text-sm">
+                      {countyLabel || "—"}
+                    </div>
+                    {isCountyMissing ? (
+                      <p className="text-[11px] text-amber-700">
+                        County is required for the weekly PDF. Update it on your
+                        <Link
+                          href="/profile"
+                          className="ml-1 font-semibold text-primary underline"
+                        >
+                          profile
+                        </Link>
+                        , or the report may be incomplete.
+                      </p>
+                    ) : (
+                      <p className="text-[11px] text-muted-foreground">
+                        Pulled from your profile and included on the final forecast.
+                      </p>
+                    )}
                   </div>
-                </div>
 
-                <div>
-                  <label className="text-xs font-medium">Reporting Period</label>
-                  <div className="bg-muted border rounded-lg px-3 py-2 text-sm">
-                    {reportWindow
-                      ? formatWeeklyReportWindow(reportWindow)
-                      : "Next report available Monday"}
+                  <div>
+                    <label className="text-xs font-medium">Reporting Period</label>
+                    <div className="bg-muted border rounded-lg px-3 py-2 text-sm">
+                      {reportWindow
+                        ? formatWeeklyReportWindow(reportWindow)
+                        : "Next report available Monday"}
+                    </div>
                   </div>
                 </div>
 
@@ -359,6 +476,44 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
             {/* STEP 2: SELECT VARIABLES */}
             {step === 2 && (
               <>
+                <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                  <p className="font-semibold uppercase tracking-wide text-[10px]">
+                    Profile checks
+                  </p>
+                  <ul className="mt-2 space-y-1 text-[12px]">
+                    <li className="flex items-center gap-2">
+                      <span
+                        className={`inline-block h-1.5 w-1.5 rounded-full ${
+                          isCountyMissing ? "bg-amber-700" : "bg-emerald-600"
+                        }`}
+                      />
+                      <span className="font-semibold text-slate-900">
+                        County:{" "}
+                        {countyLabel ? (
+                          <span className="text-slate-700">{countyLabel}</span>
+                        ) : (
+                          <span className="text-amber-900">Missing</span>
+                        )}
+                      </span>
+                    </li>
+                  </ul>
+                  {!countyLabel ? (
+                    <p className="mt-1 text-[11px]">
+                      Please update the{" "}
+                      <Link
+                        href="/profile"
+                        className="font-semibold text-primary underline"
+                      >
+                        profile page
+                      </Link>{" "}
+                      so the report includes county context.
+                    </p>
+                  ) : (
+                    <p className="mt-1 text-[11px] text-emerald-800">
+                      County will be embedded into the PDF cover and narrations.
+                    </p>
+                  )}
+                </div>
                 <p className="text-sm font-medium">Available variables:</p>
 
                 <div className="space-y-2 max-h-48 overflow-y-auto">
@@ -444,12 +599,21 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
                 </ul>
 
                 <button
-                  disabled={isGenerating}
+                  disabled={isGenerating || isCountyMissing}
                   onClick={handleGenerateReport}
                   className="w-full bg-primary text-primary-foreground py-2 rounded-lg disabled:opacity-50"
                 >
                   {isGenerating ? "Generating Report..." : "Generate Report"}
                 </button>
+                {isCountyMissing && (
+                  <p className="mt-2 text-[12px] text-amber-700">
+                    County is required to build the report.{" "}
+                    <Link href="/profile" className="font-semibold text-primary underline">
+                      Update your profile
+                    </Link>{" "}
+                    first to avoid incomplete PDFs.
+                  </p>
+                )}
               </>
             )}
 

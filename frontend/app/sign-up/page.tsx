@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
+import { GoogleLogo } from "@/components/icons/google-logo";
 import { authService } from "@/lib/services/authService";
 import { cn } from "@/lib/utils";
 import type { SignUpData } from "@/lib/models/auth";
@@ -259,14 +260,13 @@ export default function SignUp() {
       setShowPassword(false);
       setShowConfirmPassword(false);
 
-      setTimeout(() => router.push("/sign-in"), 2000);
     } catch (err: any) {
       const msg = err.message.toLowerCase();
       if (
         msg.includes("already registered") ||
         msg.includes("already exists")
       ) {
-        setError("This email is already registered. Please sign in instead.");
+        setError("An account with this email already exists. Please sign in.");
       } else if (msg.includes("weak") || msg.includes("password")) {
         setError(
           "Password does not meet security requirements. Please use a stronger password.",
@@ -300,7 +300,7 @@ export default function SignUp() {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: `${window.location.origin}/sign-up`,
+          redirectTo: `${window.location.origin}/dashboard`,
         },
       });
 
@@ -452,7 +452,10 @@ export default function SignUp() {
                   onClick={handleGoogleSignUp}
                   disabled={isLoading}
                 >
-                  Continue with Google
+                  <span className="flex items-center justify-center gap-2">
+                    <GoogleLogo />
+                    Continue with Google
+                  </span>
                 </Button>
                 <div className="relative flex items-center justify-center text-xs text-muted-foreground">
                   <span className="absolute inset-x-0 h-px bg-border/60" />
@@ -472,7 +475,9 @@ export default function SignUp() {
                     <CheckCircle className="mt-0.5 h-5 w-5 shrink-0 text-green-500" />
                     <div>
                       <p className="text-sm font-medium text-green-700">{success}</p>
-                      <p className="mt-1 text-xs text-green-600">Redirecting to login in a few seconds...</p>
+                      <p className="mt-1 text-xs text-green-600">
+                        Keep this tab open until you've clicked the confirmation link in your email.
+                      </p>
                     </div>
                   </div>
                 )}
@@ -497,7 +502,7 @@ export default function SignUp() {
 
                 <div className="space-y-2">
                   <Label htmlFor="email">
-                    Work Email <span className="text-red-500">*</span>
+                    Email <span className="text-red-500">*</span>
                   </Label>
                   <Input
                     id="email"

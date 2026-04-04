@@ -13,6 +13,7 @@ from app.schemas.setting import (
 from app.api.v1.auth import get_current_user
 from app.core.supabase import get_supabase_anon, get_supabase_admin
 from app.core.config import settings
+from app.services.profile_service import fetch_profile_for_user
 from datetime import datetime
 import logging
 from typing import Any, Dict, Optional, List
@@ -160,17 +161,8 @@ async def get_preview_geometry(
     user_id = user.id if hasattr(user, "id") else user.get("id")
 
     if not county:
-        try:
-            profile_response = supabase_admin.table("profiles")\
-                .select("county")\
-                .eq("id", user_id)\
-                .limit(1)\
-                .execute()
-            profile_row = profile_response.data[0] if profile_response.data else {}
-            county = profile_row.get("county")
-        except Exception as exc:
-            logger.error("profile_county_fetch_failed", extra={"error": str(exc)})
-            county = None
+        profile = fetch_profile_for_user(supabase_admin, user)
+        county = profile.get("county") if profile else None
 
     if not county:
         raise HTTPException(

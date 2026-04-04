@@ -1,4 +1,5 @@
 "use client"
+import type { Session as SupabaseSession } from "@supabase/auth-js"
 import Link from "next/link"
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import {
@@ -24,8 +25,10 @@ import { SystemConfiguration } from "@/components/ui-panels/system-configuration
 import { DataUpload } from "@/components/data-upload"
 import { StatusPanel } from "@/components/ui/status-panel"
 import { bootstrapService } from "@/lib/services/bootstrapService"
+import { authService } from "@/lib/services/authService"
 import { useAuth } from "@/hooks/useAuth"
 import type { User } from "@/lib/models/auth"
+import { supabase } from "@/lib/supabaseClient"
 
 type Screen = "dashboard" | "generate" | "archive" | "config" | "upload"
 type LogoutPhase = "idle" | "submitting" | "success"
@@ -100,6 +103,21 @@ export default function Dashboard() {
   const logoutPanel =
     logoutPhase === "idle" ? null : LOGOUT_PANEL_CONTENT[logoutPhase]
 
+  const syncOAuthSession = useCallback(
+    async (session?: SupabaseSession | null) => {
+      if (!session || authService.hasStoredSession()) {
+        return
+      }
+
+      try {
+        await authService.initializeSessionFromOAuth(session)
+      } catch (err) {
+        console.error("OAuth session initialization failed:", err)
+      }
+    },
+    [],
+  )
+
   const redirectToLanding = useCallback((): void => {
     window.location.replace("/")
   }, [])
@@ -138,6 +156,36 @@ export default function Dashboard() {
       }
     }
   }, [])
+
+  useEffect(() => {
+    const initializeOAuthSession = async (): Promise<void> => {
+      if (typeof window === "undefined") return
+
+      const { data, error } = await supabase.auth.getSession()
+      if (error) {
+        console.error("Failed to read OAuth session:", error)
+        return
+      }
+
+      if (data?.session) {
+        await syncOAuthSession(data.session)
+      }
+    }
+
+    void initializeOAuthSession()
+
+    const { data: listener } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        if (event === "SIGNED_IN") {
+          void syncOAuthSession(session)
+        }
+      },
+    )
+
+    return () => {
+      listener?.subscription.unsubscribe()
+    }
+  }, [syncOAuthSession])
 
   const handleLogout = async () => {
     if (logoutPhase !== "idle") return
