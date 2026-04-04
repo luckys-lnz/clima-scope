@@ -33,7 +33,9 @@ export default function ResetPasswordPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hasSession) {
-      setError("This reset link has expired. Request a new link from the sign-in page.");
+      setError(
+        "This reset link has expired. Request a new link from the sign-in page.",
+      );
       return;
     }
 
@@ -67,7 +69,9 @@ export default function ResetPasswordPage() {
       await authService.initializeSessionFromOAuth(sessionData.session);
       router.push("/dashboard");
     } catch (err: any) {
-      setError(err.message || "Unable to reset your password. Please try again.");
+      setError(
+        err.message || "Unable to reset your password. Please try again.",
+      );
     } finally {
       setIsLoading(false);
     }
@@ -89,7 +93,9 @@ export default function ResetPasswordPage() {
             </div>
             <div className="text-center">
               <h1 className="text-lg font-semibold">Reset password</h1>
-              <p className="text-sm text-muted-foreground">Set a secure password for your Clima Scope account.</p>
+              <p className="text-sm text-muted-foreground">
+                Set a secure password for your account.
+              </p>
             </div>
           </header>
 
@@ -103,7 +109,8 @@ export default function ResetPasswordPage() {
 
             {!hasSession && (
               <p className="text-sm text-muted-foreground">
-                We could not detect a password reset session. Please request a fresh link from the sign-in page.
+                We could not detect a password reset session. Please request a
+                fresh link from the sign-in page.
               </p>
             )}
 
@@ -115,7 +122,9 @@ export default function ResetPasswordPage() {
                     type="button"
                     onClick={() => setShowPassword((prev) => !prev)}
                     className="text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground"
-                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    aria-label={
+                      showPassword ? "Hide password" : "Show password"
+                    }
                     disabled={isLoading}
                   >
                     {showPassword ? "Hide" : "Show"}
@@ -135,10 +144,16 @@ export default function ResetPasswordPage() {
                     type="button"
                     onClick={() => setShowPassword((prev) => !prev)}
                     className="absolute inset-y-0 right-0 inline-flex items-center justify-center px-3 text-slate-500 transition-colors hover:text-slate-900"
-                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    aria-label={
+                      showPassword ? "Hide password" : "Show password"
+                    }
                     disabled={isLoading}
                   >
-                    {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                    {showPassword ? (
+                      <EyeOff className="size-4" />
+                    ) : (
+                      <Eye className="size-4" />
+                    )}
                   </button>
                 </div>
               </div>
@@ -150,7 +165,9 @@ export default function ResetPasswordPage() {
                     type="button"
                     onClick={() => setShowConfirmPassword((prev) => !prev)}
                     className="text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground"
-                    aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                    aria-label={
+                      showConfirmPassword ? "Hide password" : "Show password"
+                    }
                     disabled={isLoading}
                   >
                     {showConfirmPassword ? "Hide" : "Show"}
@@ -170,10 +187,16 @@ export default function ResetPasswordPage() {
                     type="button"
                     onClick={() => setShowConfirmPassword((prev) => !prev)}
                     className="absolute inset-y-0 right-0 inline-flex items-center justify-center px-3 text-slate-500 transition-colors hover:text-slate-900"
-                    aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                    aria-label={
+                      showConfirmPassword ? "Hide password" : "Show password"
+                    }
                     disabled={isLoading}
                   >
-                    {showConfirmPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                    {showConfirmPassword ? (
+                      <EyeOff className="size-4" />
+                    ) : (
+                      <Eye className="size-4" />
+                    )}
                   </button>
                 </div>
               </div>

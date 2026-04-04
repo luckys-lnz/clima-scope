@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import {
   AlertCircle,
   ArrowLeft,
@@ -382,8 +383,18 @@ export default function SignUp() {
                   <ArrowLeft className="size-4" />
                   Back to login
                 </Link>
-                <Link href="/" className="text-lg font-semibold tracking-wide">
-                  Clima Scope
+                <Link
+                  href="/"
+                  className="inline-flex items-center justify-center"
+                >
+                  <Image
+                    src="/logo.png"
+                    alt="Clima Scope"
+                    width={180}
+                    height={52}
+                    className="h-10 w-auto brightness-0 invert"
+                    priority
+                  />
                 </Link>
               </div>
 
@@ -747,9 +758,9 @@ export default function SignUp() {
                 </div>
 
                 <div className="rounded-2xl border border-border/40 bg-background/40 p-4 text-xs leading-6 text-muted-foreground">
-                  Use a password unique to Clima Scope. County selection is
-                  required so the right location context, dashboard scope, and
-                  report workflow are attached to your account immediately.
+                  Use a unique password. County selection is required so the
+                  right location context, dashboard scope, and report workflow
+                  are attached to your account immediately.
                 </div>
 
                 <Button

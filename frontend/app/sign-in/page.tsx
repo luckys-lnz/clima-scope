@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import { AlertCircle, Eye, EyeOff } from "lucide-react";
 
 import type { Session as SupabaseSession } from "@supabase/auth-js";
@@ -150,9 +151,14 @@ export default function SignIn() {
               href="/"
               className="inline-flex items-center gap-2 text-sm font-medium transition-opacity hover:opacity-80"
             >
-              <span className="text-lg font-semibold tracking-wide">
-                Clima Scope
-              </span>
+              <Image
+                src="/logo.png"
+                alt="Clima Scope"
+                width={180}
+                height={52}
+                className="h-10 w-auto brightness-0 invert"
+                priority
+              />
             </Link>
             <h1 className="mt-8 text-3xl font-semibold tracking-tight">
               Welcome back
