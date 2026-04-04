@@ -301,12 +301,15 @@ export default function Dashboard() {
               <div className="space-y-2">
                 <Image
                   src="/logo.png"
-                  alt="Clima Scope"
+                  alt="Kunanyesha"
                   width={180}
                   height={52}
                   className="h-8 w-auto brightness-0 invert"
                   priority
                 />
+                <p className="text-sm font-semibold tracking-wide text-accent-blue">
+                  Kunanyesha
+                </p>
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <MapPin className="h-3.5 w-3.5 text-primary/80" />
                   <span>{sessionUser?.county || "—"} County</span>

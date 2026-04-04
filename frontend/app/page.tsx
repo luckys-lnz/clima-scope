@@ -13,15 +13,18 @@ export default function Home() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             {/* <Cloud className="w-8 h-8 text-accent-blue" /> */}
-            <Link href="/">
+            <Link href="/" className="inline-flex flex-col items-center gap-1">
               <Image
                 src="/logo.png"
-                alt="Clima Scope"
+                alt="Kunanyesha"
                 width={180}
                 height={52}
                 className="h-9 w-auto brightness-0 invert"
                 priority
               />
+              <span className="text-base font-semibold tracking-wide text-accent-blue sm:text-lg">
+                Kunanyesha
+              </span>
             </Link>
           </div>
           <div className="flex items-center gap-4">

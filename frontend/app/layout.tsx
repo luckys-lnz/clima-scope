@@ -11,7 +11,7 @@ const publicSans = Public_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "Weather Reporting System - Kenya County Forecasts",
+  title: "Kunanyesha - Kenya County Weather Reporting",
   description:
     "Automated weekly county-level weather reporting using GFS 7-day forecast data",
   icons: {

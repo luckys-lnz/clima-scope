@@ -385,16 +385,19 @@ export default function SignUp() {
                 </Link>
                 <Link
                   href="/"
-                  className="inline-flex items-center justify-center"
+                  className="inline-flex flex-col items-center justify-center gap-1"
                 >
                   <Image
                     src="/logo.png"
-                    alt="Clima Scope"
+                    alt="Kunanyesha"
                     width={180}
                     height={52}
                     className="h-10 w-auto brightness-0 invert"
                     priority
                   />
+                  <span className="text-sm font-semibold tracking-wide text-accent-blue">
+                    Kunanyesha
+                  </span>
                 </Link>
               </div>
 

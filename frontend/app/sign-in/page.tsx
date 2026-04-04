@@ -157,16 +157,19 @@ export default function SignIn() {
           <div className="mb-8 text-center">
             <Link
               href="/"
-              className="inline-flex items-center gap-2 text-sm font-medium transition-opacity hover:opacity-80"
+              className="inline-flex flex-col items-center gap-1 text-sm font-medium transition-opacity hover:opacity-80"
             >
               <Image
                 src="/logo.png"
-                alt="Clima Scope"
+                alt="Kunanyesha"
                 width={180}
                 height={52}
                 className="h-10 w-auto brightness-0 invert"
                 priority
               />
+              <span className="text-sm font-semibold tracking-wide text-accent-blue">
+                Kunanyesha
+              </span>
             </Link>
             <h1 className="mt-8 text-3xl font-semibold tracking-tight">
               Welcome back
