@@ -1,12 +1,17 @@
-"use client"
+"use client";
 
-import { useId, useState } from "react"
-import { useRouter } from "next/navigation"
-import { Check, Loader2, X } from "lucide-react"
+import { useId, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Check, Loader2, X } from "lucide-react";
 
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardAction,
@@ -15,15 +20,24 @@ import {
   CardFooter,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card"
-import { Switch } from "@/components/ui/switch"
-import { useAuth } from "@/hooks/useAuth"
-import { cn } from "@/lib/utils"
-import { PRICING_FAQS, PRICING_PLANS, type PlanId, type PricingPlan } from "@/lib/content/pricing"
-import { subscriptionService, type SubscriptionPlan } from "@/lib/services/subscriptionService"
+} from "@/components/ui/card";
+import { Switch } from "@/components/ui/switch";
+import { useAuth } from "@/hooks/useAuth";
+import { cn } from "@/lib/utils";
+import {
+  PRICING_FAQS,
+  PRICING_PLANS,
+  type PlanId,
+  type PricingPlan,
+} from "@/lib/content/pricing";
+import { subscriptionService } from "@/lib/services/subscriptionService";
+import {
+  getPriceForCycle,
+  resolveBackendPlan,
+  type BillingCycle,
+} from "@/lib/services/subscriptionPlanResolver";
 
-type BillingCycle = "monthly" | "annual"
-type HeadingLevel = "h1" | "h2"
+type HeadingLevel = "h1" | "h2";
 
 const BILLING_CONFIG = {
   monthly: {
@@ -34,18 +48,18 @@ const BILLING_CONFIG = {
     label: "Billed yearly",
     period: "/year",
   },
-} as const satisfies Record<BillingCycle, { label: string; period: string }>
+} as const satisfies Record<BillingCycle, { label: string; period: string }>;
 
 const HEADING_STYLES: Record<HeadingLevel, string> = {
   h1: "text-4xl sm:text-5xl font-bold",
   h2: "text-3xl sm:text-4xl font-bold",
-}
+};
 
 interface PricingSectionProps {
-  id?: string
-  headingLevel?: HeadingLevel
-  showFaqs?: boolean
-  className?: string
+  id?: string;
+  headingLevel?: HeadingLevel;
+  showFaqs?: boolean;
+  className?: string;
 }
 
 export function PricingSection({
@@ -54,71 +68,51 @@ export function PricingSection({
   showFaqs = true,
   className,
 }: PricingSectionProps) {
-  const router = useRouter()
-  const { access_token } = useAuth()
-  const toggleId = useId()
-  const [billingCycle, setBillingCycle] = useState<BillingCycle>("monthly")
-  const [loadingPlan, setLoadingPlan] = useState<PlanId | null>(null)
-  const [errorMessage, setErrorMessage] = useState<string>("")
+  const router = useRouter();
+  const { access_token } = useAuth();
+  const toggleId = useId();
+  const [billingCycle, setBillingCycle] = useState<BillingCycle>("monthly");
+  const [loadingPlan, setLoadingPlan] = useState<PlanId | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string>("");
 
-  const isAnnual = billingCycle === "annual"
-  const HeadingTag = headingLevel
-  const getPriceForCycle = (plan: PricingPlan, cycle: BillingCycle): number =>
-    cycle === "annual" ? plan.annual : plan.monthly
-
-  const resolveBackendPlan = (plans: SubscriptionPlan[], cycle: BillingCycle): SubscriptionPlan | null => {
-    const targetAmount = getPriceForCycle(PRICING_PLANS[0], cycle)
-    const targetCycle = cycle === "annual" ? "yearly" : "monthly"
-
-    const exact = plans.find((p) => {
-      const price = Number(p.price)
-      const billing = String(p.billing_cycle || "").trim().toLowerCase()
-      const currency = String(p.currency || "").trim().toUpperCase()
-      return price === targetAmount && billing === targetCycle && currency === "KES"
-    })
-    if (exact) return exact
-
-    const cycleOnly = plans.find((p) => String(p.billing_cycle || "").trim().toLowerCase() === targetCycle)
-    if (cycleOnly) return cycleOnly
-
-    const priceOnly = plans.find((p) => Number(p.price) === targetAmount)
-    if (priceOnly) return priceOnly
-
-    return plans[0] ?? null
-  }
+  const isAnnual = billingCycle === "annual";
+  const HeadingTag = headingLevel;
 
   const handleCheckout = async (planId: PlanId): Promise<void> => {
-    setErrorMessage("")
+    setErrorMessage("");
     if (!access_token) {
-      router.push("/sign-in")
-      return
+      router.push("/sign-in");
+      return;
     }
 
     try {
-      setLoadingPlan(planId)
-      const plans = await subscriptionService.getPlans(access_token)
-      const backendPlan = resolveBackendPlan(plans, billingCycle)
+      setLoadingPlan(planId);
+      const plans = await subscriptionService.getPlans(access_token);
+      const backendPlan = resolveBackendPlan(plans, billingCycle);
       if (!backendPlan) {
-        throw new Error("No matching backend subscription plan found. Please contact support.")
+        throw new Error(
+          "No matching backend subscription plan found. Please contact support.",
+        );
       }
 
       const checkout = await subscriptionService.startCheckout(access_token, {
         plan_id: backendPlan.id,
-        return_url: typeof window !== "undefined" ? window.location.href : undefined,
+        return_url:
+          typeof window !== "undefined" ? window.location.href : undefined,
         description: `${backendPlan.name} subscription`,
-      })
+      });
 
       if (!checkout.redirect_url) {
-        throw new Error("Pesapal checkout URL was not returned.")
+        throw new Error("Pesapal checkout URL was not returned.");
       }
 
-      window.location.href = checkout.redirect_url
+      window.location.href = checkout.redirect_url;
     } catch (error: any) {
-      setErrorMessage(error?.message || "Failed to initialize payment.")
+      setErrorMessage(error?.message || "Failed to initialize payment.");
     } finally {
-      setLoadingPlan(null)
+      setLoadingPlan(null);
     }
-  }
+  };
 
   return (
     <section id={id} className={className}>
@@ -147,7 +141,7 @@ export function PricingSection({
               className="border-zinc-400/80 data-[state=unchecked]:bg-zinc-700 data-[state=checked]:bg-emerald-500 focus-visible:ring-emerald-300/40"
               checked={isAnnual}
               onCheckedChange={(checked) => {
-                setBillingCycle(checked ? "annual" : "monthly")
+                setBillingCycle(checked ? "annual" : "monthly");
               }}
               aria-label="Toggle annual billing"
             />
@@ -166,9 +160,9 @@ export function PricingSection({
 
         <div className="mt-12 max-w-3xl mx-auto">
           {PRICING_PLANS.map((plan) => {
-            const price = getPriceForCycle(plan, billingCycle)
-            const isLoading = loadingPlan === plan.id
-            const isPopularOffer = isAnnual
+            const price = getPriceForCycle(plan, billingCycle);
+            const isLoading = loadingPlan === plan.id;
+            const isPopularOffer = isAnnual;
 
             return (
               <Card
@@ -181,7 +175,9 @@ export function PricingSection({
                 <CardHeader className="pb-3 md:pb-4 px-6 pt-6 md:px-8 md:pt-8">
                   <div className="space-y-2">
                     <CardTitle className="text-2xl">{plan.name}</CardTitle>
-                    <CardDescription className="text-sm md:text-base">{plan.description}</CardDescription>
+                    <CardDescription className="text-sm md:text-base">
+                      {plan.description}
+                    </CardDescription>
                   </div>
                   {isPopularOffer && (
                     <CardAction>
@@ -192,7 +188,9 @@ export function PricingSection({
                 <CardContent className="flex-1 grid gap-8 md:grid-cols-2 px-6 py-2 md:px-8">
                   <div className="space-y-3">
                     <div className="flex items-end gap-2">
-                      <span className="text-5xl font-semibold tracking-tight">KES {price.toLocaleString()}</span>
+                      <span className="text-5xl font-semibold tracking-tight">
+                        KES {price.toLocaleString()}
+                      </span>
                       <span className="text-sm text-muted-foreground">
                         {BILLING_CONFIG[billingCycle].period}
                       </span>
@@ -202,7 +200,8 @@ export function PricingSection({
                     </p>
                     {isAnnual && (
                       <p className="text-sm font-medium text-primary">
-                        Full-year coverage for teams that prefer one annual invoice.
+                        Full-year coverage for teams that prefer one annual
+                        invoice.
                       </p>
                     )}
                   </div>
@@ -236,7 +235,7 @@ export function PricingSection({
                     variant={plan.ctaVariant}
                     disabled={isLoading}
                     onClick={() => {
-                      void handleCheckout(plan.id)
+                      void handleCheckout(plan.id);
                     }}
                   >
                     {isLoading ? (
@@ -250,7 +249,7 @@ export function PricingSection({
                   </Button>
                 </CardFooter>
               </Card>
-            )
+            );
           })}
         </div>
 
@@ -272,9 +271,12 @@ export function PricingSection({
           <div className="mt-16">
             <div className="max-w-3xl mx-auto">
               <div className="text-center space-y-2">
-                <h3 className="text-2xl font-semibold">Frequently asked questions</h3>
+                <h3 className="text-2xl font-semibold">
+                  Frequently asked questions
+                </h3>
                 <p className="text-muted-foreground">
-                  Answers to common questions about billing, upgrades, and usage.
+                  Answers to common questions about billing, upgrades, and
+                  usage.
                 </p>
               </div>
               <Accordion type="single" collapsible className="mt-8">
@@ -290,5 +292,5 @@ export function PricingSection({
         )}
       </div>
     </section>
-  )
+  );
 }

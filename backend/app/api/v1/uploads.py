@@ -6,7 +6,7 @@ import logging
 
 from app.schemas.upload import UploadResponse
 from app.core.supabase import get_supabase_anon
-from app.api.v1.auth import get_current_user
+from app.api.v1.subscription_guard import require_paid_or_trial_access
 from app.core.config import settings
 
 router = APIRouter(tags=["uploads"])
@@ -68,7 +68,7 @@ async def handle_file_upload(
     # Insert record first
     try:
         db_response = supabase.table("uploads").insert(record).execute()
-        
+
         if not db_response.data:
             raise HTTPException(status_code=500, detail="Failed to create upload record")
     except Exception as e:
@@ -104,11 +104,11 @@ async def upload_files(
     report_year: int = Form(...),
     report_start_at: date = Form(...),
     report_end_at: date = Form(...),
-    user=Depends(get_current_user),
+    user=Depends(require_paid_or_trial_access),
 ):
     supabase = get_supabase_anon()
     user_id = user.id if hasattr(user, "id") else user.get("id")
-    
+
     uploaded = []
     errors = []
 
@@ -139,7 +139,7 @@ async def upload_files(
 # -------------------------
 @router.get("/", response_model=List[UploadResponse])
 async def list_uploads(
-    user=Depends(get_current_user),
+    user=Depends(require_paid_or_trial_access),
     limit: int = 100,
     offset: int = 0,
 ):
@@ -153,7 +153,7 @@ async def list_uploads(
             .order("uploaded_at", desc=True)\
             .range(offset, offset + limit - 1)\
             .execute()
-        
+
         return [UploadResponse.model_validate(item) for item in response.data]
     except Exception as e:
         logger.error(f"Error listing uploads: {e}")
@@ -164,7 +164,7 @@ async def list_uploads(
 # GET: Single upload
 # -------------------------
 @router.get("/{upload_id}", response_model=UploadResponse)
-async def get_upload(upload_id: str, user=Depends(get_current_user)):
+async def get_upload(upload_id: str, user=Depends(require_paid_or_trial_access)):
     supabase = get_supabase_anon()
     user_id = user.id if hasattr(user, "id") else user.get("id")
 
@@ -193,7 +193,7 @@ async def get_upload(upload_id: str, user=Depends(get_current_user)):
 async def update_status(
     upload_id: str,
     status: str = Form(...),
-    user=Depends(get_current_user),
+    user=Depends(require_paid_or_trial_access),
 ):
     supabase = get_supabase_anon()
     user_id = user.id if hasattr(user, "id") else user.get("id")
@@ -230,7 +230,7 @@ async def update_status(
 # DELETE: Remove upload
 # -------------------------
 @router.delete("/{upload_id}")
-async def delete_upload(upload_id: str, user=Depends(get_current_user)):
+async def delete_upload(upload_id: str, user=Depends(require_paid_or_trial_access)):
     supabase = get_supabase_anon()
     user_id = user.id if hasattr(user, "id") else user.get("id")
 

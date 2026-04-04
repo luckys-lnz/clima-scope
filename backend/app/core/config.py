@@ -22,15 +22,15 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=True,
     )
-    
+
     # Application
     APP_NAME: str = "Clima-scope API"
     APP_VERSION: str = "0.1.0"
     DEBUG: bool = Field(default=False, env="DEBUG")
-    
+
     # API
     API_V1_PREFIX: str = "/api/v1"
-    
+
     # CORS
     CORS_ORIGINS: str = Field(
         default="http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001",
@@ -75,7 +75,7 @@ class Settings(BaseSettings):
             return raw
 
         return str(value)
-    
+
     @property
     def cors_origins_list(self) -> List[str]:
         """Parse CORS origins from comma-separated string."""
@@ -87,19 +87,19 @@ class Settings(BaseSettings):
         env="SUPABASE_URL",
         description="Supabase project URL"
     )
-    
+
     SUPABASE_SERVICE_KEY: str = Field(
         default="",  # Will be required from .env
         env="SUPABASE_SERVICE_KEY",
         description="Supabase service role key (for backend operations)"
     )
-    
+
     SUPABASE_ANON_KEY: str = Field(
         default="",  # Will be required from .env
-        env="SUPABASE_ANON_KEY", 
+        env="SUPABASE_ANON_KEY",
         description="Supabase anonymous key (for frontend operations)"
     )
-    
+
     SUPABASE_STORAGE_BUCKET: str = Field(
         default="weather-reports",
         env="SUPABASE_STORAGE_BUCKET",
@@ -120,6 +120,12 @@ class Settings(BaseSettings):
     PESAPAL_IPN_SECRET: str = Field(default="", env="PESAPAL_IPN_SECRET")
     PESAPAL_IPN_ALLOWED_IPS: str = Field(default="", env="PESAPAL_IPN_ALLOWED_IPS")
 
+    # Trial and subscription gate
+    TRIAL_ENABLED: bool = Field(default=True, env="TRIAL_ENABLED")
+    TRIAL_DAYS: int = Field(default=30, env="TRIAL_DAYS")
+    TRIAL_GRACE_DAYS: int = Field(default=3, env="TRIAL_GRACE_DAYS")
+    ENFORCE_SUBSCRIPTION_GATE: bool = Field(default=True, env="ENFORCE_SUBSCRIPTION_GATE")
+
     # Station Data Auto Fetch (TAHMO/KMD)
     AUTO_STATION_FETCH_ENABLED: bool = Field(default=True, env="AUTO_STATION_FETCH_ENABLED")
     TAHMO_BASE_URL: str = Field(default="", env="TAHMO_BASE_URL")
@@ -127,7 +133,7 @@ class Settings(BaseSettings):
     KMD_BASE_URL: str = Field(default="", env="KMD_BASE_URL")
     KMD_API_KEY: str = Field(default="", env="KMD_API_KEY")
     STATION_FETCH_TIMEOUT_SECONDS: int = Field(default=30, env="STATION_FETCH_TIMEOUT_SECONDS")
-    
+
     # File Storage
     STORAGE_PATH: str = Field(
         default=str(Path(__file__).parent.parent.parent / "storage"),
@@ -137,13 +143,13 @@ class Settings(BaseSettings):
         default=str(Path(__file__).parent.parent.parent / "storage" / "pdfs"),
         env="PDF_STORAGE_PATH"
     )
-    
+
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
-    
+
     # Logging
     LOG_LEVEL: str = Field(default="INFO", env="LOG_LEVEL")
-    
+
 # Create settings instance
 settings = Settings()
 

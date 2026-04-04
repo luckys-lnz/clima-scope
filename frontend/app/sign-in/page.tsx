@@ -16,8 +16,7 @@ import { cn } from "@/lib/utils";
 import type { LoginData } from "@/lib/models/auth";
 import { GoogleLogo } from "@/components/icons/google-logo";
 
-const INPUT_CLASSNAME =
-  "h-11 rounded-xl border border-slate-300 bg-white shadow-sm caret-slate-900 focus-visible:bg-white focus-visible:border-sky-600 focus-visible:ring-2 focus-visible:ring-sky-500/40";
+const INPUT_CLASSNAME = "h-11 rounded-xl";
 
 export default function SignIn() {
   const router = useRouter();
@@ -135,7 +134,9 @@ export default function SignIn() {
 
       if (error) throw error;
     } catch (err: any) {
-      setError(err.message || "Unable to sign in with Google. Please try again.");
+      setError(
+        err.message || "Unable to sign in with Google. Please try again.",
+      );
       setIsLoading(false);
     }
   };
@@ -177,7 +178,9 @@ export default function SignIn() {
               </Button>
               <div className="relative flex items-center justify-center text-sm text-muted-foreground">
                 <span className="absolute inset-x-0 h-px bg-border/60" />
-                <span className="bg-card px-3 text-sm">or continue with email</span>
+                <span className="bg-card px-3 text-sm">
+                  or continue with email
+                </span>
               </div>
             </div>
             <form onSubmit={handleSubmit} className="space-y-5">

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Form
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Any, Dict
 from httpx import QueryParams
 import logging
@@ -13,6 +13,7 @@ from app.schemas.auth import (
     UserResponse,
     ProfileUpdateRequest,
 )
+from app.core.config import settings
 from app.core.supabase import get_supabase_admin, get_supabase_anon
 from app.services.profile_service import fetch_profile_for_user, get_user_email
 from app.utils.map_settings import DEFAULT_MAP_SETTINGS
@@ -238,7 +239,7 @@ async def signup(user_data: SignupRequest):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="An account already exists for this email. Please log in instead.",
         )
-    
+
     try:
         # Create auth user
         auth_resp = supabase_admin.auth.sign_up({
@@ -251,13 +252,19 @@ async def signup(user_data: SignupRequest):
 
         # Create profile
         try:
+            trial_started_at = datetime.utcnow()
+            trial_ends_at = trial_started_at + timedelta(days=settings.TRIAL_DAYS)
             supabase_admin.table("profiles").insert({
                 "id": auth_resp.user.id,
                 "full_name": user_data.full_name,
                 "organization": user_data.organization,
                 "county": user_data.county,
                 "phone": user_data.phone,
-                "created_at": datetime.utcnow().isoformat()
+                "created_at": datetime.utcnow().isoformat(),
+                "trial_started_at": trial_started_at.isoformat(),
+                "trial_ends_at": trial_ends_at.isoformat(),
+                "trial_status": "active" if settings.TRIAL_ENABLED else "converted",
+                "trial_converted_at": None if settings.TRIAL_ENABLED else datetime.utcnow().isoformat(),
             }).execute()
         except Exception as e:
             # Rollback user creation if profile fails
@@ -305,7 +312,7 @@ async def login(user_data: LoginRequest):
         # Check if email is verified
         if not auth_resp.user.email_confirmed_at:
             raise HTTPException(
-                status_code=401, 
+                status_code=401,
                 detail="Please verify your email before logging in"
             )
 
@@ -361,7 +368,7 @@ async def get_current_user_profile(user=Depends(get_current_user)):
         _ensure_default_user_settings(supabase_admin, user_id)
     except Exception as exc:
         logger.warning("Failed to ensure default user settings for user %s: %s", user_id, str(exc))
-    
+
     return UserResponse(
         id=user.id,
         email=user.email,
@@ -384,7 +391,7 @@ async def get_current_user_profile(user=Depends(get_current_user)):
 @router.put("/profile", response_model=UserResponse)
 async def update_profile(updates: ProfileUpdateRequest, user=Depends(get_current_user)):
     supabase_admin = get_supabase_admin()
-    
+
     update_data = updates.model_dump(exclude_unset=True, exclude_none=True)
     # Accept both title and prefix from the client, but store under prefix.
     if "title" in update_data:
@@ -409,7 +416,7 @@ async def update_profile(updates: ProfileUpdateRequest, user=Depends(get_current
             raise HTTPException(status_code=400, detail=f"Profile update failed: {str(e)}")
 
     profile = fetch_profile_for_user(supabase_admin, user)
-    
+
     return UserResponse(
         id=user.id,
         email=user.email,
@@ -431,7 +438,7 @@ async def update_profile(updates: ProfileUpdateRequest, user=Depends(get_current
 @router.post("/refresh")
 async def refresh_token(payload: Optional[RefreshTokenRequest] = None, refresh_token: Optional[str] = Form(None)):
     supabase = get_supabase_anon()
-    
+
     try:
         token = payload.refresh_token if payload and payload.refresh_token else refresh_token
         if not token:

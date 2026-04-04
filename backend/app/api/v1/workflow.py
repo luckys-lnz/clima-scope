@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
 
 from app.core.supabase import get_supabase_anon, get_supabase_admin
-from app.api.v1.auth import get_current_user
+from app.api.v1.subscription_guard import require_paid_or_trial_access
 from app.schemas.workflow import (
     ValidationRequest,
     ValidationResponse,
@@ -877,7 +877,7 @@ class AsyncReportStartResponse(BaseModel):
 async def get_workflow_status(
     week: Optional[int] = Query(default=None),
     year: Optional[int] = Query(default=None),
-    user=Depends(get_current_user),
+    user=Depends(require_paid_or_trial_access),
 ):
     supabase = get_supabase_anon()
     user_id = user.id if hasattr(user, "id") else user.get("id")
@@ -933,7 +933,7 @@ async def _run_report_generation_background(
 @router.post("/generate-report-async", response_model=AsyncReportStartResponse)
 async def generate_report_async(
     request: ReportGenerationRequest,
-    user=Depends(get_current_user),
+    user=Depends(require_paid_or_trial_access),
 ):
     """
     Start Step 4 report generation as a background task.
@@ -1004,7 +1004,7 @@ async def generate_report_async(
 @router.post("/validate-inputs", response_model=ValidationResponse)
 async def validate_inputs(
     request: ValidationRequest,
-    user=Depends(get_current_user)
+    user=Depends(require_paid_or_trial_access)
 ):
     """
     Step 1: Validate observation + shapefile for the SPECIFIED reporting period
@@ -1012,7 +1012,7 @@ async def validate_inputs(
     print("\n" + "="*60)
     print("🔍 WORKFLOW VALIDATION STARTED")
     print("="*60)
-    
+
     supabase_admin = get_supabase_admin()
     # Use admin client for server-side validation queries to avoid RLS-based false negatives.
     supabase = supabase_admin
@@ -1031,27 +1031,27 @@ async def validate_inputs(
                 "report_end_at": request.report_end_at,
             },
         )
-    
+
     print(f"👤 User ID: {user_id}")
     print(f"🪣 Using bucket: {BUCKET_NAME}")
     print(f"📊 Validating for week: {request.report_week}, year: {request.report_year}")
     print(f"📅 Period: {request.report_start_at} to {request.report_end_at}")
-    
+
     # =========================
     # DEBUG: Check ALL user uploads first
     # =========================
     print("\n" + "-"*40)
     print("📋 CHECKING ALL USER UPLOADS")
     print("-"*40)
-    
+
     try:
         all_uploads = supabase.table("uploads")\
             .select("*")\
             .eq("user_id", user_id)\
             .execute()
-        
+
         print(f"📊 Total uploads for user: {len(all_uploads.data)}")
-        
+
         if all_uploads.data:
             print("\n📁 ALL UPLOADS:")
             for i, upload in enumerate(all_uploads.data):
@@ -1066,26 +1066,26 @@ async def validate_inputs(
                 print("     ---")
         else:
             print("❌ No uploads found for this user!")
-            
+
     except Exception as e:
         print(f"❌ Error fetching all uploads: {e}")
-    
+
     # =========================
     # DEBUG: Check observation files only
     # =========================
     print("\n" + "-"*40)
     print("📋 CHECKING OBSERVATION FILES ONLY")
     print("-"*40)
-    
+
     try:
         obs_files = supabase.table("uploads")\
             .select("*")\
             .eq("user_id", user_id)\
             .eq("file_type", "observations")\
             .execute()
-        
+
         print(f"📊 Total observation files: {len(obs_files.data)}")
-        
+
         if obs_files.data:
             print("\n📁 OBSERVATION FILES:")
             for i, obs in enumerate(obs_files.data):
@@ -1097,10 +1097,10 @@ async def validate_inputs(
                 print("     ---")
         else:
             print("❌ No observation files found!")
-            
+
     except Exception as e:
         print(f"❌ Error fetching observation files: {e}")
-    
+
     # =========================
     # 1️⃣ RESOLVE OBSERVATION DATA (UPLOAD OR AUTO-FETCH)
     # =========================
@@ -1182,7 +1182,7 @@ async def validate_inputs(
     print("\n" + "-"*40)
     print("🗺️ LOOKING FOR SHAPEFILE")
     print("-"*40)
-    
+
     try:
         shapes_response = supabase_admin.table("shared_files")\
             .select("id,file_name,file_path,upload_date")\
@@ -1190,15 +1190,15 @@ async def validate_inputs(
             .order("upload_date", desc=True)\
             .limit(1)\
             .execute()
-        
+
         shapes = shapes_response.data or []
         print(f"📊 Found {len(shapes)} shapefiles")
-        
+
         if shapes:
             print(f"✅ Using shapefile: {shapes[0].get('file_name')}")
         else:
             print("❌ No shapefile found")
-            
+
     except Exception as e:
         print(f"❌ Error fetching shapefiles: {e}")
         shapes = []
@@ -1224,16 +1224,16 @@ async def validate_inputs(
     print("\n" + "-"*40)
     print("⬇️ LOADING OBSERVATION DATA")
     print("-"*40)
-    
+
     try:
         file_data = obs_payload["bytes"]
         print(f"✅ Download successful: {len(file_data)} bytes")
-        
+
         # Read CSV from bytes
         df = pd.read_csv(io.BytesIO(file_data))
         print(f"📊 CSV loaded: {len(df)} rows, {len(df.columns)} columns")
         print(f"📋 Columns: {list(df.columns)}")
-        
+
     except Exception as e:
         print(f"❌ Failed to read observation file: {e}")
         append_workflow_log(
@@ -1365,7 +1365,7 @@ async def validate_inputs(
     print("-"*40)
     print(f"📊 Response: {len(found)} variables, {len(df)} source rows")
     print("="*60 + "\n")
-    
+
     return ValidationResponse(
         observation_found=True,
         shapefile_found=True,
@@ -1391,7 +1391,7 @@ async def validate_inputs(
 @router.post("/generate-maps", response_model=MapGenerationResponse)
 async def generate_maps(
     request: MapGenerationRequest,
-    user=Depends(get_current_user),
+    user=Depends(require_paid_or_trial_access),
 ):
     """
     Step 3: Generate maps for each selected variable
@@ -1805,7 +1805,7 @@ async def generate_maps(
 @router.post("/generate-report", response_model=ReportGenerationResponse)
 async def generate_report(
     request: ReportGenerationRequest,
-    user=Depends(get_current_user),
+    user=Depends(require_paid_or_trial_access),
 ):
     """
     Step 4: Generate the final weekly PDF report and store it in Supabase.

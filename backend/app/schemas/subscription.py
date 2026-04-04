@@ -51,9 +51,19 @@ class UserSubscriptionOut(BaseModel):
     pesapal_merchant_reference: Optional[str] = None
 
 
+class TrialStateOut(BaseModel):
+    status: str
+    started_at: Optional[datetime] = None
+    ends_at: Optional[datetime] = None
+    days_remaining: int = 0
+    grace_days: int = 0
+
+
 class SubscriptionStateOut(BaseModel):
     subscription: Optional[UserSubscriptionOut] = None
     latest_payment: Optional[PaymentStatusOut] = None
+    trial: Optional[TrialStateOut] = None
+    access_status: str = "payment_required"
 
 
 class PlanListOut(BaseModel):

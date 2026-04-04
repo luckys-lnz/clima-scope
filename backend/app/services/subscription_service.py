@@ -1,5 +1,6 @@
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from math import ceil
 from typing import Any, Dict, Optional
 from uuid import uuid4
 
@@ -45,6 +46,123 @@ def _map_payment_status(provider_status: str) -> str:
     if normalized in {"FAILED", "INVALID", "CANCELLED", "REVERSED"}:
         return "FAILED"
     return "PENDING"
+
+
+def _parse_datetime(value: Any) -> Optional[datetime]:
+    if not value:
+        return None
+
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        text = str(value).replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _compute_trial_state(profile: Dict[str, Any]) -> Dict[str, Any]:
+    trial_status = str(profile.get("trial_status") or "active").strip().lower()
+    started_at = _parse_datetime(profile.get("trial_started_at"))
+    ends_at = _parse_datetime(profile.get("trial_ends_at"))
+    now = datetime.now(timezone.utc)
+
+    if not settings.TRIAL_ENABLED:
+        trial_status = "converted"
+
+    if trial_status == "active" and ends_at:
+        effective_end = ends_at + timedelta(days=max(0, int(settings.TRIAL_GRACE_DAYS)))
+        if now > effective_end:
+            trial_status = "expired"
+
+    days_remaining = 0
+    if trial_status == "active" and ends_at:
+        effective_end = ends_at + timedelta(days=max(0, int(settings.TRIAL_GRACE_DAYS)))
+        seconds = (effective_end - now).total_seconds()
+        days_remaining = max(0, int(ceil(seconds / 86400.0)))
+
+    return {
+        "status": trial_status,
+        "started_at": started_at,
+        "ends_at": ends_at,
+        "days_remaining": days_remaining,
+        "grace_days": max(0, int(settings.TRIAL_GRACE_DAYS)),
+    }
+
+
+def _has_active_subscription(subscription: Optional[Dict[str, Any]]) -> bool:
+    if not subscription:
+        return False
+
+    status = str(subscription.get("status") or "").strip().lower()
+    if status != "active":
+        return False
+
+    period_end = _parse_datetime(subscription.get("current_period_end"))
+    if not period_end:
+        return True
+
+    return datetime.now(timezone.utc) <= period_end
+
+
+def get_user_access_state(supabase_admin, user: Any) -> Dict[str, Any]:
+    user_id = _safe_user_id(user)
+    sub_rows = (
+        supabase_admin.table("user_subscriptions")
+        .select("*")
+        .eq("user_id", user_id)
+        .order("updated_at", desc=True)
+        .limit(1)
+        .execute()
+    ).data or []
+
+    payment_rows = (
+        supabase_admin.table("payments")
+        .select("*")
+        .eq("user_id", user_id)
+        .order("updated_at", desc=True)
+        .limit(1)
+        .execute()
+    ).data or []
+
+    profile_rows = (
+        supabase_admin.table("profiles")
+        .select("trial_started_at,trial_ends_at,trial_status,trial_converted_at")
+        .eq("id", user_id)
+        .limit(1)
+        .execute()
+    ).data or []
+
+    subscription = sub_rows[0] if sub_rows else None
+    latest_payment = payment_rows[0] if payment_rows else None
+    profile = profile_rows[0] if profile_rows else {}
+
+    trial_state = _compute_trial_state(profile)
+    has_subscription = _has_active_subscription(subscription)
+    if has_subscription:
+        access_status = "subscribed"
+    elif trial_state["status"] == "active":
+        access_status = "trial_active"
+    else:
+        access_status = "payment_required"
+
+    if profile_rows and trial_state["status"] == "expired" and str(profile.get("trial_status") or "").lower() == "active":
+        try:
+            supabase_admin.table("profiles").update({"trial_status": "expired"}).eq("id", user_id).execute()
+        except Exception as exc:
+            logger.warning("trial_status_update_failed", extra={"user_id": user_id, "error": str(exc)})
+
+    return {
+        "subscription": subscription,
+        "latest_payment": latest_payment,
+        "trial": trial_state,
+        "access_status": access_status,
+    }
 
 
 def list_public_plans(supabase_admin) -> list[Dict[str, Any]]:
@@ -334,6 +452,15 @@ def handle_pesapal_ipn(
             order_tracking_id=order_tracking_id,
             merchant_reference=merchant_reference,
         )
+        try:
+            supabase_admin.table("profiles").update(
+                {"trial_status": "converted", "trial_converted_at": _utc_now_iso()}
+            ).eq("id", str(payment["user_id"])).execute()
+        except Exception as exc:
+            logger.warning(
+                "trial_conversion_mark_failed",
+                extra={"user_id": str(payment["user_id"]), "error": str(exc)},
+            )
 
     return {
         "payment_id": str(payment["id"]),
@@ -345,27 +472,4 @@ def handle_pesapal_ipn(
 
 
 def get_user_subscription_state(supabase_admin, user: Any) -> Dict[str, Any]:
-    user_id = _safe_user_id(user)
-    sub_rows = (
-        supabase_admin.table("user_subscriptions")
-        .select("*")
-        .eq("user_id", user_id)
-        .order("updated_at", desc=True)
-        .limit(1)
-        .execute()
-    ).data or []
-
-    payment_rows = (
-        supabase_admin.table("payments")
-        .select("*")
-        .eq("user_id", user_id)
-        .order("updated_at", desc=True)
-        .limit(1)
-        .execute()
-    ).data or []
-
-    return {
-        "subscription": sub_rows[0] if sub_rows else None,
-        "latest_payment": payment_rows[0] if payment_rows else None,
-    }
-
+    return get_user_access_state(supabase_admin=supabase_admin, user=user)

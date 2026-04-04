@@ -1,5 +1,5 @@
-@import 'tailwindcss';
-@import 'tw-animate-css';
+@import "tailwindcss";
+@import "tw-animate-css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -75,8 +75,8 @@
 }
 
 @theme inline {
-  --font-sans: 'Geist', 'Geist Fallback';
-  --font-mono: 'Geist Mono', 'Geist Mono Fallback';
+  --font-sans: var(--font-ui), "Public Sans", "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", "Geist Mono Fallback";
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -115,11 +115,93 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
+:root {
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --text-3xl: 1.875rem;
+  --text-4xl: 2.25rem;
+  --leading-tight: 1.2;
+  --leading-base: 1.55;
+  --leading-loose: 1.75;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
   body {
     @apply bg-background text-foreground;
+    font-size: var(--text-base);
+    line-height: var(--leading-base);
+    font-weight: 400;
+    letter-spacing: 0;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply text-foreground;
+    line-height: var(--leading-tight);
+    font-weight: 650;
+    letter-spacing: -0.01em;
+  }
+
+  h1 {
+    font-size: clamp(var(--text-3xl), 4vw, 2.75rem);
+  }
+
+  h2 {
+    font-size: clamp(var(--text-2xl), 3vw, 2rem);
+  }
+
+  h3 {
+    font-size: clamp(var(--text-xl), 2.2vw, 1.5rem);
+  }
+
+  h4 {
+    font-size: var(--text-lg);
+  }
+
+  p,
+  li {
+    line-height: var(--leading-base);
+  }
+
+  small {
+    font-size: var(--text-sm);
+    line-height: var(--leading-loose);
+  }
+
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus,
+  textarea:-webkit-autofill,
+  textarea:-webkit-autofill:hover,
+  textarea:-webkit-autofill:focus,
+  select:-webkit-autofill,
+  select:-webkit-autofill:hover,
+  select:-webkit-autofill:focus {
+    color: var(--foreground);
+    caret-color: var(--foreground);
+    -webkit-text-fill-color: currentColor;
+    -webkit-box-shadow: 0 0 0 1000px var(--input) inset;
+    box-shadow: 0 0 0 1000px var(--input) inset;
+    transition: background-color 9999s ease-out 0s;
+  }
+
+  input:autofill,
+  textarea:autofill,
+  select:autofill {
+    color: var(--foreground);
+    caret-color: var(--foreground);
+    background-color: var(--input);
   }
 }

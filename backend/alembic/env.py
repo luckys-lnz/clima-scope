@@ -1,4 +1,5 @@
 from logging.config import fileConfig
+import os
 
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
@@ -26,6 +27,29 @@ target_metadata = None
 # ... etc.
 
 
+def _resolve_database_url() -> str:
+    url = (
+        os.getenv("DATABASE_URL")
+        or os.getenv("SQLALCHEMY_DATABASE_URL")
+        or config.get_main_option("sqlalchemy.url")
+    )
+    if not url:
+        raise RuntimeError(
+            "Database URL is missing. Set DATABASE_URL or SQLALCHEMY_DATABASE_URL."
+        )
+
+    if url.startswith("driver://"):
+        raise RuntimeError(
+            "Invalid Alembic database URL placeholder detected. Set DATABASE_URL or SQLALCHEMY_DATABASE_URL."
+        )
+
+    # SQLAlchemy requires postgresql:// scheme instead of postgres://.
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://"):]
+
+    return url
+
+
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode.
 
@@ -38,7 +62,7 @@ def run_migrations_offline() -> None:
     script output.
 
     """
-    url = config.get_main_option("sqlalchemy.url")
+    url = _resolve_database_url()
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -57,6 +81,7 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
+    config.set_main_option("sqlalchemy.url", _resolve_database_url())
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",

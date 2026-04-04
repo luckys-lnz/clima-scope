@@ -27,11 +27,10 @@ import type { SignUpData } from "@/lib/models/auth";
 import type { Session as SupabaseSession } from "@supabase/auth-js";
 import { supabase } from "@/lib/supabaseClient";
 
-const INPUT_CLASSNAME =
-  "h-11 rounded-xl border border-slate-300 bg-white shadow-sm caret-slate-900 focus-visible:bg-white focus-visible:border-sky-600 focus-visible:ring-2 focus-visible:ring-sky-500/40";
+const INPUT_CLASSNAME = "h-11 rounded-xl";
 
 const SELECT_CLASSNAME =
-  "flex h-11 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950 shadow-none outline-none transition-[color,box-shadow] focus-visible:border-sky-500 focus-visible:ring-[3px] focus-visible:ring-sky-500/20 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50";
+  "flex h-11 w-full rounded-xl border border-input bg-transparent px-3 py-2 text-sm text-foreground shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50";
 
 const PASSWORD_REQUIREMENTS = [
   { key: "length", label: "At least 8 characters" },
@@ -43,7 +42,9 @@ const PASSWORD_REQUIREMENTS = [
 
 type PasswordRequirementKey = (typeof PASSWORD_REQUIREMENTS)[number]["key"];
 
-function getPasswordChecks(password: string): Record<PasswordRequirementKey, boolean> {
+function getPasswordChecks(
+  password: string,
+): Record<PasswordRequirementKey, boolean> {
   return {
     length: password.length >= 8,
     uppercase: /[A-Z]/.test(password),
@@ -65,7 +66,7 @@ function getPasswordStrength(password: string) {
       progress: 0,
       label: "Start typing a password",
       textClass: "text-slate-500",
-      indicatorClass: "[&_[data-slot=progress-indicator]]:bg-slate-400",
+      indicatorClass: "**:data-[slot=progress-indicator]:bg-slate-400",
     };
   }
 
@@ -75,7 +76,7 @@ function getPasswordStrength(password: string) {
       progress: 25,
       label: "Weak password",
       textClass: "text-red-500",
-      indicatorClass: "[&_[data-slot=progress-indicator]]:bg-red-500",
+      indicatorClass: "**:data-[slot=progress-indicator]:bg-red-500",
     };
   }
 
@@ -85,7 +86,7 @@ function getPasswordStrength(password: string) {
       progress: 55,
       label: "Fair password",
       textClass: "text-amber-500",
-      indicatorClass: "[&_[data-slot=progress-indicator]]:bg-amber-500",
+      indicatorClass: "**:data-[slot=progress-indicator]:bg-amber-500",
     };
   }
 
@@ -95,7 +96,7 @@ function getPasswordStrength(password: string) {
       progress: 78,
       label: "Strong password",
       textClass: "text-sky-600",
-      indicatorClass: "[&_[data-slot=progress-indicator]]:bg-sky-500",
+      indicatorClass: "**:data-[slot=progress-indicator]:bg-sky-500",
     };
   }
 
@@ -104,7 +105,7 @@ function getPasswordStrength(password: string) {
     progress: 100,
     label: "Very strong password",
     textClass: "text-emerald-600",
-    indicatorClass: "[&_[data-slot=progress-indicator]]:bg-emerald-500",
+    indicatorClass: "**:data-[slot=progress-indicator]:bg-emerald-500",
   };
 }
 
@@ -210,7 +211,12 @@ export default function SignUp() {
     }
 
     const checks = getPasswordChecks(formData.password);
-    if (!checks.uppercase || !checks.lowercase || !checks.number || !checks.special) {
+    if (
+      !checks.uppercase ||
+      !checks.lowercase ||
+      !checks.number ||
+      !checks.special
+    ) {
       return "Password must contain uppercase, lowercase, numeric, and special characters";
     }
 
@@ -259,7 +265,6 @@ export default function SignUp() {
       });
       setShowPassword(false);
       setShowConfirmPassword(false);
-
     } catch (err: any) {
       const msg = err.message.toLowerCase();
       if (
@@ -306,7 +311,9 @@ export default function SignUp() {
 
       if (error) throw error;
     } catch (err: any) {
-      setError(err.message || "Unable to continue with Google. Please try again.");
+      setError(
+        err.message || "Unable to continue with Google. Please try again.",
+      );
       setIsLoading(false);
     }
   };
@@ -375,10 +382,7 @@ export default function SignUp() {
                   <ArrowLeft className="size-4" />
                   Back to login
                 </Link>
-                <Link
-                  href="/"
-                  className="text-lg font-semibold tracking-wide"
-                >
+                <Link href="/" className="text-lg font-semibold tracking-wide">
                   Clima Scope
                 </Link>
               </div>
@@ -391,8 +395,9 @@ export default function SignUp() {
                   Create an account built for county reporting operations.
                 </h1>
                 <p className="text-base leading-7 text-muted-foreground">
-                  Set up a workspace for your county team, secure your report workflow,
-                  and start generating structured weather outputs with the right regional context from day one.
+                  Set up a workspace for your county team, secure your report
+                  workflow, and start generating structured weather outputs with
+                  the right regional context from day one.
                 </p>
               </div>
 
@@ -401,30 +406,40 @@ export default function SignUp() {
                   {
                     icon: MapPinned,
                     title: "County-aware setup",
-                    description: "Tie the account to the county your team supports so dashboards and workflows start in the right context.",
+                    description:
+                      "Tie the account to the county your team supports so dashboards and workflows start in the right context.",
                   },
                   {
                     icon: FileText,
                     title: "Operational reporting",
-                    description: "Prepare weekly outputs, county summaries, and distribution-ready material in one place.",
+                    description:
+                      "Prepare weekly outputs, county summaries, and distribution-ready material in one place.",
                   },
                   {
                     icon: Send,
                     title: "Distribution readiness",
-                    description: "Keep email delivery, automation, and review workflows aligned with the team responsible for the report.",
+                    description:
+                      "Keep email delivery, automation, and review workflows aligned with the team responsible for the report.",
                   },
                 ].map((item) => {
                   const Icon = item.icon;
 
                   return (
-                    <div key={item.title} className="rounded-2xl border border-border/40 bg-background/40 p-4">
+                    <div
+                      key={item.title}
+                      className="rounded-2xl border border-border/40 bg-background/40 p-4"
+                    >
                       <div className="flex items-start gap-4">
                         <div className="rounded-xl bg-accent-blue/10 p-2 text-accent-blue">
                           <Icon className="h-5 w-5" />
                         </div>
                         <div>
-                          <h2 className="text-sm font-semibold">{item.title}</h2>
-                          <p className="mt-1 text-sm leading-6 text-muted-foreground">{item.description}</p>
+                          <h2 className="text-sm font-semibold">
+                            {item.title}
+                          </h2>
+                          <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                            {item.description}
+                          </p>
                         </div>
                       </div>
                     </div>
@@ -438,9 +453,12 @@ export default function SignUp() {
             <div className="mx-auto w-full max-w-md">
               <div className="mb-8 flex items-center justify-between gap-4">
                 <div>
-                  <h2 className="text-3xl font-semibold tracking-tight">Create your workspace</h2>
+                  <h2 className="text-3xl font-semibold tracking-tight">
+                    Create your workspace
+                  </h2>
                   <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                    Use your work details so county dashboards, reporting workflows, and forecast operations are configured correctly.
+                    Use your work details so county dashboards, reporting
+                    workflows, and forecast operations are configured correctly.
                   </p>
                 </div>
               </div>
@@ -459,7 +477,9 @@ export default function SignUp() {
                 </Button>
                 <div className="relative flex items-center justify-center text-xs text-muted-foreground">
                   <span className="absolute inset-x-0 h-px bg-border/60" />
-                  <span className="bg-card px-3 text-sm">or continue with email</span>
+                  <span className="bg-card px-3 text-sm">
+                    or continue with email
+                  </span>
                 </div>
               </div>
 
@@ -474,9 +494,12 @@ export default function SignUp() {
                   <div className="flex items-start gap-3 rounded-2xl border border-green-200 bg-green-50 p-4">
                     <CheckCircle className="mt-0.5 h-5 w-5 shrink-0 text-green-500" />
                     <div>
-                      <p className="text-sm font-medium text-green-700">{success}</p>
+                      <p className="text-sm font-medium text-green-700">
+                        {success}
+                      </p>
                       <p className="mt-1 text-xs text-green-600">
-                        Keep this tab open until you've clicked the confirmation link in your email.
+                        Keep this tab open until you've clicked the confirmation
+                        link in your email.
                       </p>
                     </div>
                   </div>
@@ -523,7 +546,12 @@ export default function SignUp() {
                     <Label htmlFor="password">
                       Password <span className="text-red-500">*</span>
                     </Label>
-                    <span className={cn("text-xs font-semibold", passwordStrength.textClass)}>
+                    <span
+                      className={cn(
+                        "text-xs font-semibold",
+                        passwordStrength.textClass,
+                      )}
+                    >
                       {passwordStrength.label}
                     </span>
                   </div>
@@ -545,16 +573,22 @@ export default function SignUp() {
                       type="button"
                       onClick={() => setShowPassword((prev) => !prev)}
                       className="absolute inset-y-0 right-0 inline-flex items-center justify-center px-3 text-slate-500 transition-colors hover:text-slate-900"
-                      aria-label={showPassword ? "Hide password" : "Show password"}
+                      aria-label={
+                        showPassword ? "Hide password" : "Show password"
+                      }
                       disabled={isLoading}
                     >
-                      {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                      {showPassword ? (
+                        <EyeOff className="size-4" />
+                      ) : (
+                        <Eye className="size-4" />
+                      )}
                     </button>
                   </div>
                   <Progress
                     value={passwordStrength.progress}
                     className={cn(
-                      "h-2 bg-slate-100 [&_[data-slot=progress-indicator]]:transition-transform",
+                      "h-2 bg-slate-100 **:data-[slot=progress-indicator]:transition-transform",
                       passwordStrength.indicatorClass,
                     )}
                   />
@@ -567,7 +601,9 @@ export default function SignUp() {
                           key={requirement.key}
                           className={cn(
                             "flex items-center gap-2 text-xs transition-colors",
-                            isMet ? "text-emerald-400" : "text-muted-foreground",
+                            isMet
+                              ? "text-emerald-400"
+                              : "text-muted-foreground",
                           )}
                         >
                           <span
@@ -596,10 +632,14 @@ export default function SignUp() {
                       <span
                         className={cn(
                           "text-xs font-semibold",
-                          passwordsMatch ? "text-emerald-600" : "text-amber-500",
+                          passwordsMatch
+                            ? "text-emerald-600"
+                            : "text-amber-500",
                         )}
                       >
-                        {passwordsMatch ? "Passwords match" : "Passwords do not match"}
+                        {passwordsMatch
+                          ? "Passwords match"
+                          : "Passwords do not match"}
                       </span>
                     )}
                   </div>
@@ -621,15 +661,24 @@ export default function SignUp() {
                       type="button"
                       onClick={() => setShowConfirmPassword((prev) => !prev)}
                       className="absolute inset-y-0 right-0 inline-flex items-center justify-center px-3 text-slate-500 transition-colors hover:text-slate-900"
-                      aria-label={showConfirmPassword ? "Hide confirm password" : "Show confirm password"}
+                      aria-label={
+                        showConfirmPassword
+                          ? "Hide confirm password"
+                          : "Show confirm password"
+                      }
                       disabled={isLoading}
                     >
-                      {showConfirmPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                      {showConfirmPassword ? (
+                        <EyeOff className="size-4" />
+                      ) : (
+                        <Eye className="size-4" />
+                      )}
                     </button>
                   </div>
                   {confirmPasswordHasValue && !passwordsMatch && (
                     <p className="text-xs text-amber-600">
-                      Make sure both password fields are identical before submitting.
+                      Make sure both password fields are identical before
+                      submitting.
                     </p>
                   )}
                 </div>
@@ -670,7 +719,11 @@ export default function SignUp() {
                         Select county
                       </option>
                       {kenyanCounties.map((county) => (
-                        <option key={county} value={county} className="bg-white text-slate-950">
+                        <option
+                          key={county}
+                          value={county}
+                          className="bg-white text-slate-950"
+                        >
                           {county}
                         </option>
                       ))}
@@ -678,9 +731,7 @@ export default function SignUp() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="phone">
-                      Phone
-                    </Label>
+                    <Label htmlFor="phone">Phone</Label>
                     <Input
                       id="phone"
                       type="tel"
@@ -696,8 +747,9 @@ export default function SignUp() {
                 </div>
 
                 <div className="rounded-2xl border border-border/40 bg-background/40 p-4 text-xs leading-6 text-muted-foreground">
-                  Use a password unique to Clima Scope. County selection is required so the
-                  right location context, dashboard scope, and report workflow are attached to your account immediately.
+                  Use a password unique to Clima Scope. County selection is
+                  required so the right location context, dashboard scope, and
+                  report workflow are attached to your account immediately.
                 </div>
 
                 <Button
@@ -711,7 +763,10 @@ export default function SignUp() {
 
               <p className="mt-6 text-center text-sm text-muted-foreground">
                 Already have an account?{" "}
-                <Link href="/sign-in" className="font-semibold text-accent-blue transition-colors hover:text-accent-blue/80">
+                <Link
+                  href="/sign-in"
+                  className="font-semibold text-accent-blue transition-colors hover:text-accent-blue/80"
+                >
                   Sign in
                 </Link>
               </p>

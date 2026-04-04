@@ -1,7 +1,14 @@
 import type React from "react";
 import type { Metadata, Viewport } from "next";
 import { Analytics } from "@vercel/analytics/next";
+import { Public_Sans } from "next/font/google";
 import "./globals.css";
+
+const publicSans = Public_Sans({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-ui",
+});
 
 export const metadata: Metadata = {
   title: "Weather Reporting System - Kenya County Forecasts",
@@ -29,7 +36,7 @@ export default function RootLayout({
     <html lang="en" className="dark" suppressHydrationWarning>
       <body
         suppressHydrationWarning
-        className={`font-sans antialiased overflow-x-hidden`}
+        className={`${publicSans.variable} font-sans antialiased overflow-x-hidden`}
       >
         {children}
         <Analytics />

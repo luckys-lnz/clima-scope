@@ -9,7 +9,7 @@ import re
 import pandas as pd
 
 from app.schemas.report import ReportArchiveItem
-from app.api.v1.auth import get_current_user
+from app.api.v1.subscription_guard import require_paid_or_trial_access
 from app.core.supabase import get_supabase_admin, get_supabase_anon
 from app.core.config import settings
 from app.services.narration_service import summarize_observation_data, generate_report_narration
@@ -161,7 +161,7 @@ def _build_forecast_summary_from_report_data(report_data: dict) -> dict:
 
 
 @router.get("", response_model=List[ReportArchiveItem])
-async def get_user_reports(user=Depends(get_current_user)):
+async def get_user_reports(user=Depends(require_paid_or_trial_access)):
     """
     Return list of reports for the current user
     """
@@ -179,7 +179,7 @@ async def get_user_reports(user=Depends(get_current_user)):
             .eq("user_id", user_id)\
             .order("generated_at", desc=True)\
             .execute()
-        
+
         rows = reports_response.data or []
     except Exception as e:
         print(f"Error fetching reports: {e}")
@@ -219,7 +219,7 @@ async def get_user_reports(user=Depends(get_current_user)):
 
 
 @router.get("/detail/{report_id}")
-async def get_report_detail(report_id: UUID, user=Depends(get_current_user)):
+async def get_report_detail(report_id: UUID, user=Depends(require_paid_or_trial_access)):
     """
     Return dynamic detail payload for a specific generated report.
     """
@@ -477,10 +477,10 @@ async def get_report_detail(report_id: UUID, user=Depends(get_current_user)):
 
 
 @router.get("/download/{report_id}")
-async def download_report(report_id: UUID, user=Depends(get_current_user)):
+async def download_report(report_id: UUID, user=Depends(require_paid_or_trial_access)):
     # Use anon client - respects RLS policies
     supabase = get_supabase_anon()
-    
+
     user_id = user.id if hasattr(user, "id") else user.get("id")
 
     # Get report details and verify ownership in one query
@@ -490,7 +490,7 @@ async def download_report(report_id: UUID, user=Depends(get_current_user)):
             .eq("id", str(report_id))\
             .eq("user_id", user_id)\
             .execute()
-        
+
         rows = report_response.data or []
     except Exception as e:
         print(f"Error fetching report: {e}")
@@ -522,15 +522,15 @@ async def download_report(report_id: UUID, user=Depends(get_current_user)):
         # 1. The bucket has proper RLS policies
         # 2. The user has access to this specific file
         file_data = supabase.storage.from_(bucket_name).download(object_path)
-        
+
         if not file_data:
             raise HTTPException(status_code=404, detail="File not found in storage")
-        
+
         filename = object_path.split("/")[-1]
-        
+
         return StreamingResponse(
-            io.BytesIO(file_data), 
-            media_type="application/pdf", 
+            io.BytesIO(file_data),
+            media_type="application/pdf",
             headers={
                 "Content-Disposition": f'attachment; filename="{filename}"'
             }
