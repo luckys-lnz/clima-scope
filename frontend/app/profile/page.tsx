@@ -118,14 +118,7 @@ export default function ProfilePage() {
   return (
     <div className="min-h-screen bg-background flex flex-col items-center px-4 py-8">
       <div className="w-full max-w-2xl">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-3xl font-bold">Update Profile</h1>
-            <p className="text-muted-foreground">
-              Manage sign-off details used in weekly forecast PDFs.
-            </p>
-          </div>
-
+        <div className="mb-6 space-y-3">
           <Link
             href="/dashboard"
             className="inline-flex items-center gap-2 text-sm font-medium text-sky-600 transition-colors hover:text-sky-700"
@@ -134,6 +127,13 @@ export default function ProfilePage() {
             <ArrowLeft className="w-4 h-4" />
             Back to dashboard
           </Link>
+
+          <div>
+            <h1 className="text-3xl font-bold">Update Profile</h1>
+            <p className="text-muted-foreground">
+              Manage sign-off details used in weekly forecast PDFs.
+            </p>
+          </div>
         </div>
 
         <form
