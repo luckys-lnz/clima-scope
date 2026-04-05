@@ -1,90 +1,81 @@
-"use client"
+"use client";
 
-import { useRef, useState } from "react"
-import { Loader2, Check, AlertTriangle } from "lucide-react"
-import { uploadService } from "@/lib/services/uploadService"
-import { getCurrentWeeklyReportWindow } from "@/lib/utils/report_date"
-import { FileUploadSection } from "./file-upload-section"
+import { useRef, useState } from "react";
+import { Loader2, Check, AlertTriangle } from "lucide-react";
+import { uploadService } from "@/lib/services/uploadService";
+import { getCurrentWeeklyReportWindow } from "@/lib/utils/report_date";
+import { FileUploadSection } from "./file-upload-section";
 
-interface DataUploadProps {
-  onBack: () => void
-}
+export function DataUpload() {
+  const uploadRef = useRef<HTMLInputElement>(null);
 
-export function DataUpload({ onBack }: DataUploadProps) {
-  const uploadRef = useRef<HTMLInputElement>(null)
-
-  const [files, setFiles] = useState<File[]>([])
-  const [step, setStep] = useState<"idle" | "uploading" | "done" | "error">("idle")
-  const [error, setError] = useState<string | null>(null)
+  const [files, setFiles] = useState<File[]>([]);
+  const [step, setStep] = useState<"idle" | "uploading" | "done" | "error">(
+    "idle",
+  );
+  const [error, setError] = useState<string | null>(null);
 
   // ---------------------------
   // File selection
   // ---------------------------
   const handleFileSelect = (fileList: FileList | null) => {
-    if (!fileList) return
-    setFiles(prev => [...prev, ...Array.from(fileList)])
-  }
+    if (!fileList) return;
+    setFiles((prev) => [...prev, ...Array.from(fileList)]);
+  };
 
   const deleteUploadedFile = (index: number) => {
-    setFiles(prev => prev.filter((_, i) => i !== index))
-  }
+    setFiles((prev) => prev.filter((_, i) => i !== index));
+  };
 
   // ---------------------------
   // Drag & drop
   // ---------------------------
   const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault()
-    handleFileSelect(e.dataTransfer.files)
-  }
+    e.preventDefault();
+    handleFileSelect(e.dataTransfer.files);
+  };
 
-  const handleDragOver = (e: React.DragEvent) => e.preventDefault()
+  const handleDragOver = (e: React.DragEvent) => e.preventDefault();
 
   // ---------------------------
   // Upload handler
   // ---------------------------
   const handleSave = async () => {
-    if (!files.length) return
+    if (!files.length) return;
 
     try {
-      setStep("uploading")
-      setError(null)
+      setStep("uploading");
+      setError(null);
 
-      const window = getCurrentWeeklyReportWindow(new Date())
+      const window = getCurrentWeeklyReportWindow(new Date());
       const toIsoDate = (d: Date) => {
-        const y = d.getFullYear()
-        const m = String(d.getMonth() + 1).padStart(2, "0")
-        const day = String(d.getDate()).padStart(2, "0")
-        return `${y}-${m}-${day}`
-      }
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, "0");
+        const day = String(d.getDate()).padStart(2, "0");
+        return `${y}-${m}-${day}`;
+      };
 
       await uploadService.uploadFiles(files, "observations", {
         report_week: window.week,
         report_year: window.year,
         report_start_at: toIsoDate(window.start),
         report_end_at: toIsoDate(window.end),
-      })
+      });
 
-      setStep("done")
+      setStep("done");
     } catch (err: any) {
-      setError(err.message || "Upload failed")
-      setStep("error")
+      setError(err.message || "Upload failed");
+      setStep("error");
     }
-  }
+  };
 
-  const isUploading = step === "uploading"
+  const isUploading = step === "uploading";
 
   // ---------------------------
   // UI
   // ---------------------------
   return (
     <div className="p-6 space-y-6">
-      <button
-        onClick={onBack}
-        className="flex items-center gap-2 text-primary hover:text-primary/80 mb-4"
-      >
-        Back to Dashboard
-      </button>
-
       <div className="max-w-3xl space-y-6">
         {/* HEADER */}
         <div className="bg-black rounded-lg border border-gray-700 p-6 text-white">
@@ -98,9 +89,7 @@ export function DataUpload({ onBack }: DataUploadProps) {
         {(step === "done" || step === "error") && (
           <div
             className={`rounded-lg border p-4 bg-black ${
-              step === "done"
-                ? "border-green-500"
-                : "border-red-500"
+              step === "done" ? "border-green-500" : "border-red-500"
             }`}
           >
             <div className="flex items-center gap-3">
@@ -159,5 +148,5 @@ export function DataUpload({ onBack }: DataUploadProps) {
         </button>
       </div>
     </div>
-  )
+  );
 }

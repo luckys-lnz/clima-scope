@@ -1,19 +1,15 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { ChevronLeft, Download } from "lucide-react"
-import { SelectInput } from "@/components/select-input"
-
-interface LogsDiagnosticsProps {
-  onBack: () => void
-}
+import { useState } from "react";
+import { Download } from "lucide-react";
+import { SelectInput } from "@/components/select-input";
 
 interface LogEntry {
-  timestamp: string
-  step: string
-  county: string
-  status: "success" | "error"
-  message: string
+  timestamp: string;
+  step: string;
+  county: string;
+  status: "success" | "error";
+  message: string;
 }
 
 const SAMPLE_LOGS: LogEntry[] = [
@@ -52,33 +48,31 @@ const SAMPLE_LOGS: LogEntry[] = [
     status: "success",
     message: "Downloaded 2.4 GB of forecast data",
   },
-]
+];
 
-export function LogsDiagnostics({ onBack }: LogsDiagnosticsProps) {
-  const [filterCounty, setFilterCounty] = useState("")
-  const [filterStep, setFilterStep] = useState("")
-  const [filterStatus, setFilterStatus] = useState("")
+export function LogsDiagnostics() {
+  const [filterCounty, setFilterCounty] = useState("");
+  const [filterStep, setFilterStep] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
 
   const filteredLogs = SAMPLE_LOGS.filter((log) => {
-    if (filterCounty && !log.county.toLowerCase().includes(filterCounty.toLowerCase())) return false
-    if (filterStep && log.step !== filterStep) return false
-    if (filterStatus && log.status !== filterStatus) return false
-    return true
-  })
+    if (
+      filterCounty &&
+      !log.county.toLowerCase().includes(filterCounty.toLowerCase())
+    )
+      return false;
+    if (filterStep && log.step !== filterStep) return false;
+    if (filterStatus && log.status !== filterStatus) return false;
+    return true;
+  });
 
   return (
     <div className="p-6 space-y-6">
-      <button
-        onClick={onBack}
-        className="flex items-center gap-2 text-primary hover:text-primary/80 transition-colors mb-4"
-      >
-        <ChevronLeft className="w-4 h-4" />
-        <span className="text-sm">Back to Dashboard</span>
-      </button>
-
       {/* Filters */}
       <div className="bg-card rounded-lg border border-border p-4">
-        <h3 className="font-semibold text-card-foreground mb-4">Filters & Export</h3>
+        <h3 className="font-semibold text-card-foreground mb-4">
+          Filters & Export
+        </h3>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <SelectInput
             value={filterCounty}
@@ -126,29 +120,49 @@ export function LogsDiagnostics({ onBack }: LogsDiagnosticsProps) {
           <table className="w-full">
             <thead>
               <tr className="border-b border-border bg-muted">
-                <th className="px-6 py-3 text-left text-sm font-semibold text-card-foreground">Timestamp</th>
-                <th className="px-6 py-3 text-left text-sm font-semibold text-card-foreground">Step</th>
-                <th className="px-6 py-3 text-left text-sm font-semibold text-card-foreground">County</th>
-                <th className="px-6 py-3 text-left text-sm font-semibold text-card-foreground">Status</th>
-                <th className="px-6 py-3 text-left text-sm font-semibold text-card-foreground">Message</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-card-foreground">
+                  Timestamp
+                </th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-card-foreground">
+                  Step
+                </th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-card-foreground">
+                  County
+                </th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-card-foreground">
+                  Status
+                </th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-card-foreground">
+                  Message
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {filteredLogs.map((log, idx) => (
                 <tr key={idx} className="hover:bg-muted/50 transition-colors">
-                  <td className="px-6 py-4 text-sm text-card-foreground font-mono">{log.timestamp}</td>
-                  <td className="px-6 py-4 text-sm text-card-foreground">{log.step}</td>
-                  <td className="px-6 py-4 text-sm text-card-foreground">{log.county}</td>
+                  <td className="px-6 py-4 text-sm text-card-foreground font-mono">
+                    {log.timestamp}
+                  </td>
+                  <td className="px-6 py-4 text-sm text-card-foreground">
+                    {log.step}
+                  </td>
+                  <td className="px-6 py-4 text-sm text-card-foreground">
+                    {log.county}
+                  </td>
                   <td className="px-6 py-4 text-sm">
                     <span
                       className={`px-2 py-1 rounded-full text-xs font-medium ${
-                        log.status === "success" ? "bg-green-500/20 text-green-600" : "bg-red-500/20 text-red-600"
+                        log.status === "success"
+                          ? "bg-green-500/20 text-green-600"
+                          : "bg-red-500/20 text-red-600"
                       }`}
                     >
                       {log.status === "success" ? "✓" : "✗"} {log.status}
                     </span>
                   </td>
-                  <td className="px-6 py-4 text-sm text-card-foreground">{log.message}</td>
+                  <td className="px-6 py-4 text-sm text-card-foreground">
+                    {log.message}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -156,5 +170,5 @@ export function LogsDiagnostics({ onBack }: LogsDiagnosticsProps) {
         </div>
       </div>
     </div>
-  )
+  );
 }

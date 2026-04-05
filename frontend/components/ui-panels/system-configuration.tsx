@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronLeft, AlertCircle } from "lucide-react";
+import { AlertCircle } from "lucide-react";
 import { TextInput } from "@/components/text-input";
 import { SelectInput } from "@/components/select-input";
 import { useState, useEffect } from "react";
@@ -18,10 +18,6 @@ interface Template {
   upload_date: string;
   file_path?: string | null;
   is_default?: boolean;
-}
-
-interface SystemConfigurationProps {
-  onBack: () => void;
 }
 
 const STORAGE_KEY = "system_settings_cache";
@@ -87,7 +83,7 @@ function createProjector(bbox: [number, number, number, number]): Projector {
   const height = Math.max(maxY - minY, 1e-6);
   const scale = Math.min(
     (PREVIEW_WIDTH - PREVIEW_PADDING * 2) / width,
-    (PREVIEW_HEIGHT - PREVIEW_PADDING * 2) / height
+    (PREVIEW_HEIGHT - PREVIEW_PADDING * 2) / height,
   );
   const offsetX = (PREVIEW_WIDTH - width * scale) / 2;
   const offsetY = (PREVIEW_HEIGHT - height * scale) / 2;
@@ -110,7 +106,7 @@ function lineToPath(coords: [number, number][], project: Projector): string {
 
 function polygonToPath(
   rings: [number, number][][],
-  project: Projector
+  project: Projector,
 ): string {
   if (!rings || rings.length === 0) return "";
   return rings
@@ -121,12 +117,15 @@ function polygonToPath(
 
 function geometryToPath(
   geometry: MapPreviewGeometry | null | undefined,
-  project: Projector
+  project: Projector,
 ): string {
   if (!geometry) return "";
   switch (geometry.type) {
     case "Polygon":
-      return polygonToPath(geometry.coordinates as [number, number][][], project);
+      return polygonToPath(
+        geometry.coordinates as [number, number][][],
+        project,
+      );
     case "MultiPolygon":
       return (geometry.coordinates as [number, number][][][])
         .map((polygon) => polygonToPath(polygon, project))
@@ -186,8 +185,8 @@ function MapSettingsPreview({
 }) {
   const hasPreview = Boolean(
     preview?.county_geometry &&
-      Array.isArray(preview?.bbox) &&
-      preview?.bbox.length === 4
+    Array.isArray(preview?.bbox) &&
+    preview?.bbox.length === 4,
   );
   const projector = hasPreview ? createProjector(preview!.bbox) : null;
   const countyPath =
@@ -221,7 +220,7 @@ function MapSettingsPreview({
   if (allLabels.length > 0 && !allLabels.some((l) => l.type)) {
     console.warn(
       "MapPreviewLabel missing 'type' property. Using name-based guess. " +
-        "Please update the backend to include 'type' ('constituency'/'ward')."
+        "Please update the backend to include 'type' ('constituency'/'ward').",
     );
   }
 
@@ -408,7 +407,7 @@ function MapSettingsPreview({
   );
 }
 
-export function SystemConfiguration({ onBack }: SystemConfigurationProps) {
+export function SystemConfiguration() {
   const {
     access_token: token,
     isLoading: authLoading,
@@ -435,46 +434,52 @@ export function SystemConfiguration({ onBack }: SystemConfigurationProps) {
   const [error, setError] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
-  const [shapefilePath, setShapefilePath] = useState(cached?.shapefilePath || "");
-  const [templates, setTemplates] = useState<Template[]>(cached?.templates || []);
+  const [shapefilePath, setShapefilePath] = useState(
+    cached?.shapefilePath || "",
+  );
+  const [templates, setTemplates] = useState<Template[]>(
+    cached?.templates || [],
+  );
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(
-    cached?.selectedTemplateId || null
+    cached?.selectedTemplateId || null,
   );
   const [showConstituencies, setShowConstituencies] = useState(
-    cached?.showConstituencies ?? true
+    cached?.showConstituencies ?? true,
   );
   const [showWards, setShowWards] = useState(cached?.showWards ?? true);
   const [showConstituencyLabels, setShowConstituencyLabels] = useState(
-    cached?.showConstituencyLabels ?? true
+    cached?.showConstituencyLabels ?? true,
   );
   const [showWardLabels, setShowWardLabels] = useState(
-    cached?.showWardLabels ?? true
+    cached?.showWardLabels ?? true,
   );
   const [constituencyLabelFontSize, setConstituencyLabelFontSize] = useState(
-    cached?.constituencyLabelFontSize ?? 12
+    cached?.constituencyLabelFontSize ?? 12,
   );
   const [wardLabelFontSize, setWardLabelFontSize] = useState(
-    cached?.wardLabelFontSize ?? 12
+    cached?.wardLabelFontSize ?? 12,
   );
   const [constituencyBorderColor, setConstituencyBorderColor] = useState(
-    cached?.constituencyBorderColor || DEFAULT_CONSTITUENCY_BORDER_COLOR
+    cached?.constituencyBorderColor || DEFAULT_CONSTITUENCY_BORDER_COLOR,
   );
   const [constituencyBorderWidth, setConstituencyBorderWidth] = useState(
-    cached?.constituencyBorderWidth ?? DEFAULT_CONSTITUENCY_BORDER_WIDTH
+    cached?.constituencyBorderWidth ?? DEFAULT_CONSTITUENCY_BORDER_WIDTH,
   );
   const [constituencyBorderStyle, setConstituencyBorderStyle] = useState(
-    cached?.constituencyBorderStyle || DEFAULT_CONSTITUENCY_BORDER_STYLE
+    cached?.constituencyBorderStyle || DEFAULT_CONSTITUENCY_BORDER_STYLE,
   );
   const [wardBorderColor, setWardBorderColor] = useState(
-    cached?.wardBorderColor || DEFAULT_WARD_BORDER_COLOR
+    cached?.wardBorderColor || DEFAULT_WARD_BORDER_COLOR,
   );
   const [wardBorderWidth, setWardBorderWidth] = useState(
-    cached?.wardBorderWidth ?? DEFAULT_WARD_BORDER_WIDTH
+    cached?.wardBorderWidth ?? DEFAULT_WARD_BORDER_WIDTH,
   );
   const [wardBorderStyle, setWardBorderStyle] = useState(
-    cached?.wardBorderStyle || DEFAULT_WARD_BORDER_STYLE
+    cached?.wardBorderStyle || DEFAULT_WARD_BORDER_STYLE,
   );
-  const [previewData, setPreviewData] = useState<MapPreviewResponse | null>(null);
+  const [previewData, setPreviewData] = useState<MapPreviewResponse | null>(
+    null,
+  );
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
 
@@ -504,13 +509,14 @@ export function SystemConfiguration({ onBack }: SystemConfigurationProps) {
           selectedTemplateId: data.user_settings?.pdf_template_id || null,
           showConstituencies: data.user_settings?.show_constituencies ?? true,
           showWards: data.user_settings?.show_wards ?? true,
-          showConstituencyLabels: data.user_settings?.show_constituency_labels ?? true,
+          showConstituencyLabels:
+            data.user_settings?.show_constituency_labels ?? true,
           showWardLabels: data.user_settings?.show_ward_labels ?? true,
           constituencyLabelFontSize: clampFontSize(
-            data.user_settings?.constituency_label_font_size ?? 12
+            data.user_settings?.constituency_label_font_size ?? 12,
           ),
           wardLabelFontSize: clampFontSize(
-            data.user_settings?.ward_label_font_size ?? 12
+            data.user_settings?.ward_label_font_size ?? 12,
           ),
           constituencyBorderColor:
             data.user_settings?.constituency_border_color ||
@@ -549,7 +555,9 @@ export function SystemConfiguration({ onBack }: SystemConfigurationProps) {
         if (!cached) setLoading(false);
       } catch (err) {
         if (!cached) {
-          setError(err instanceof Error ? err.message : "Failed to load settings");
+          setError(
+            err instanceof Error ? err.message : "Failed to load settings",
+          );
           setLoading(false);
         }
       }
@@ -586,7 +594,9 @@ export function SystemConfiguration({ onBack }: SystemConfigurationProps) {
       })
       .catch((err) => {
         if (!active) return;
-        setPreviewError(err instanceof Error ? err.message : "Failed to load map preview");
+        setPreviewError(
+          err instanceof Error ? err.message : "Failed to load map preview",
+        );
       })
       .finally(() => {
         if (!active) return;
@@ -674,7 +684,9 @@ export function SystemConfiguration({ onBack }: SystemConfigurationProps) {
       <div className="p-8 max-w-3xl">
         <div className="bg-card rounded-xl border border-destructive/30 p-8 text-center">
           <AlertCircle className="w-8 h-8 text-destructive mx-auto mb-4" />
-          <p className="text-destructive font-medium mb-2">Unable to Load Settings</p>
+          <p className="text-destructive font-medium mb-2">
+            Unable to Load Settings
+          </p>
           <p className="text-sm text-muted-foreground mb-6">{error}</p>
           <button
             onClick={() => {
@@ -693,30 +705,30 @@ export function SystemConfiguration({ onBack }: SystemConfigurationProps) {
 
   return (
     <div className="p-8 space-y-8 max-w-3xl">
-      <button
-        onClick={onBack}
-        className="flex items-center gap-2 text-primary hover:text-primary/80 transition-colors"
-      >
-        <ChevronLeft className="w-4 h-4" />
-        <span className="text-sm font-medium">Back to Dashboard</span>
-      </button>
-
       <div>
         <h1 className="text-2xl font-bold">System Settings</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Configure core resources and county map display options used in report generation.
+          Configure core resources and county map display options used in report
+          generation.
         </p>
       </div>
 
       <div className="bg-card rounded-xl border border-border p-6 space-y-4">
         <div>
-          <h2 className="text-lg font-semibold">Geographic Data Configuration</h2>
+          <h2 className="text-lg font-semibold">
+            Geographic Data Configuration
+          </h2>
           <p className="text-sm text-muted-foreground">
-            This shapefile defines the Kenya administrative boundaries used in spatial analysis.
+            This shapefile defines the Kenya administrative boundaries used in
+            spatial analysis.
           </p>
         </div>
 
-        <TextInput label="Default Boundary Shapefile" value={shapefilePath} readOnly />
+        <TextInput
+          label="Default Boundary Shapefile"
+          value={shapefilePath}
+          readOnly
+        />
       </div>
 
       <div className="bg-card rounded-xl border border-border p-6 space-y-4">
@@ -743,7 +755,8 @@ export function SystemConfiguration({ onBack }: SystemConfigurationProps) {
         <div>
           <h2 className="text-lg font-semibold">County Map Settings</h2>
           <p className="text-sm text-muted-foreground">
-            These options control boundary overlays and labels for generated county-level maps.
+            These options control boundary overlays and labels for generated
+            county-level maps.
           </p>
         </div>
 
@@ -781,7 +794,9 @@ export function SystemConfiguration({ onBack }: SystemConfigurationProps) {
                   min={0.1}
                   step={0.1}
                   value={constituencyBorderWidth}
-                  onChange={(e) => setConstituencyBorderWidth(Number(e.target.value))}
+                  onChange={(e) =>
+                    setConstituencyBorderWidth(Number(e.target.value))
+                  }
                   className="w-full px-4 py-2 rounded-lg border border-border bg-card text-card-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                 />
               </div>
@@ -816,7 +831,9 @@ export function SystemConfiguration({ onBack }: SystemConfigurationProps) {
                   max={48}
                   value={constituencyLabelFontSize}
                   onChange={(e) =>
-                    setConstituencyLabelFontSize(clampFontSize(Number(e.target.value)))
+                    setConstituencyLabelFontSize(
+                      clampFontSize(Number(e.target.value)),
+                    )
                   }
                   className="w-40 px-4 py-2 rounded-lg border border-border bg-card text-card-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                 />
@@ -931,7 +948,9 @@ export function SystemConfiguration({ onBack }: SystemConfigurationProps) {
           {saving ? "Saving..." : "Save Configuration"}
         </button>
 
-        {saveMessage && <p className="text-xs text-emerald-600">{saveMessage}</p>}
+        {saveMessage && (
+          <p className="text-xs text-emerald-600">{saveMessage}</p>
+        )}
       </div>
     </div>
   );

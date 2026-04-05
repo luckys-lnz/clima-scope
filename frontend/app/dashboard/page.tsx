@@ -21,6 +21,8 @@ import {
   X,
   LogOut,
   CheckCircle2,
+  ChevronDown,
+  UserCircle2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -108,6 +110,7 @@ export default function Dashboard() {
   );
   const [logoutPhase, setLogoutPhase] = useState<LogoutPhase>("idle");
   const logoutRedirectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const userMenuRef = useRef<HTMLDivElement | null>(null);
   const isLoggingOut = logoutPhase === "submitting";
   const isLogoutOverlayVisible = logoutPhase !== "idle";
   const logoutPanel =
@@ -191,6 +194,33 @@ export default function Dashboard() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (!userMenuOpen) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (
+        userMenuRef.current &&
+        !userMenuRef.current.contains(event.target as Node)
+      ) {
+        setUserMenuOpen(false);
+      }
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setUserMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [userMenuOpen]);
 
   useEffect(() => {
     const initializeOAuthSession = async (): Promise<void> => {
@@ -348,15 +378,6 @@ export default function Dashboard() {
                 <CreditCard className="w-4 h-4" />
                 <span>Pricing</span>
               </Link>
-
-              <Link
-                href="/limits"
-                className="w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                onClick={() => setSidebarOpen(false)}
-              >
-                <BarChart3 className="w-4 h-4" />
-                <span>Usage Limits</span>
-              </Link>
             </nav>
           </aside>
 
@@ -381,38 +402,58 @@ export default function Dashboard() {
                     {getTitle(currentScreen as string)}
                   </h2>
                 </div>
-                {/* Right: Avatar vertical */}
-                <div className="relative flex flex-col items-center">
+                {/* Right: Profile menu */}
+                <div ref={userMenuRef} className="relative">
                   <button
                     onClick={() => setUserMenuOpen((s) => !s)}
-                    className="w-9 h-9 rounded-full border border-gray-400 flex items-center justify-center text-gray-400 font-semibold hover:bg-muted transition-colors"
+                    className="group flex items-center gap-2 rounded-full border border-border bg-background px-2 py-1.5 transition-all hover:border-sky-600/50 hover:shadow-sm"
+                    aria-expanded={userMenuOpen}
+                    aria-haspopup="menu"
                   >
-                    {getAvatarLabel(sessionUser)}
+                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-sky-600/10 text-xs font-semibold text-sky-700">
+                      {getAvatarLabel(sessionUser)}
+                    </span>
+                    <span className="hidden text-left md:flex md:flex-col md:leading-tight">
+                      <span className="text-xs font-semibold text-foreground">
+                        {getDisplayName(sessionUser)}
+                      </span>
+                      <span className="max-w-44 truncate text-[11px] text-muted-foreground">
+                        {sessionUser?.email || "Account"}
+                      </span>
+                    </span>
+                    <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-hover:text-foreground" />
                   </button>
-
-                  <span className="text-xs text-muted-foreground mt-1">
-                    Welcome, {getDisplayName(sessionUser)}
-                  </span>
 
                   {/* Dropdown */}
                   {userMenuOpen && (
-                    <div className="absolute right-0 top-12 w-36 bg-card border border-border rounded-lg shadow-lg z-50">
-                      <Link
-                        href="/profile"
-                        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-muted/70 rounded-lg"
-                        onClick={() => setUserMenuOpen(false)}
-                      >
-                        <Settings className="w-4 h-4" />
-                        Profile
-                      </Link>
-                      <button
-                        onClick={handleLogout}
-                        disabled={isLoggingOut}
-                        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg"
-                      >
-                        <LogOut className="w-4 h-4" />
-                        {isLoggingOut ? "Logging out…" : "Logout"}
-                      </button>
+                    <div className="absolute right-0 top-[calc(100%+0.6rem)] z-50 w-64 overflow-hidden rounded-2xl border border-border bg-card/95 shadow-xl backdrop-blur">
+                      <div className="border-b border-border/70 px-4 py-3">
+                        <p className="text-sm font-semibold text-foreground">
+                          {getDisplayName(sessionUser)}
+                        </p>
+                        <p className="truncate text-xs text-muted-foreground">
+                          {sessionUser?.email || "No email"}
+                        </p>
+                      </div>
+
+                      <div className="p-2">
+                        <Link
+                          href="/profile"
+                          className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
+                          onClick={() => setUserMenuOpen(false)}
+                        >
+                          <UserCircle2 className="h-4 w-4 text-muted-foreground" />
+                          Profile settings
+                        </Link>
+                        <button
+                          onClick={handleLogout}
+                          disabled={isLoggingOut}
+                          className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <LogOut className="h-4 w-4" />
+                          {isLoggingOut ? "Logging out..." : "Log out"}
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -430,10 +471,7 @@ export default function Dashboard() {
                     }
                   />,
                 )}
-                {renderPanel(
-                  "generate",
-                  <ManualGeneration onBack={() => navigateTo("dashboard")} />,
-                )}
+                {renderPanel("generate", <ManualGeneration />)}
                 {renderPanel(
                   "archive",
                   selectedCounty ? (
@@ -454,16 +492,8 @@ export default function Dashboard() {
                     />
                   ),
                 )}
-                {renderPanel(
-                  "config",
-                  <SystemConfiguration
-                    onBack={() => navigateTo("dashboard")}
-                  />,
-                )}
-                {renderPanel(
-                  "upload",
-                  <DataUpload onBack={() => navigateTo("dashboard")} />,
-                )}
+                {renderPanel("config", <SystemConfiguration />)}
+                {renderPanel("upload", <DataUpload />)}
               </div>
             </div>
           </main>

@@ -1,23 +1,23 @@
-"use client"
+"use client";
 
-import { useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
-import Link from "next/link"
-import { AlertCircle, CheckCircle, ArrowLeft } from "lucide-react"
-import { authService } from "@/lib/services/authService"
-import type { User } from "@/lib/models/auth"
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { AlertCircle, CheckCircle, ArrowLeft } from "lucide-react";
+import { authService } from "@/lib/services/authService";
+import type { User } from "@/lib/models/auth";
 
 type ProfileForm = {
-  title: string
-  full_name: string
-  job_title: string
-  county: string
-  phone: string
-  personal_email: string
-  signoff_email: string
-  station_name: string
-  station_address: string
-}
+  title: string;
+  full_name: string;
+  job_title: string;
+  county: string;
+  phone: string;
+  personal_email: string;
+  signoff_email: string;
+  station_name: string;
+  station_address: string;
+};
 
 const emptyForm: ProfileForm = {
   title: "",
@@ -29,30 +29,30 @@ const emptyForm: ProfileForm = {
   signoff_email: "",
   station_name: "",
   station_address: "",
-}
+};
 
 export default function ProfilePage() {
-  const router = useRouter()
-  const [formData, setFormData] = useState<ProfileForm>(emptyForm)
-  const [isLoading, setIsLoading] = useState(false)
-  const [isSaving, setIsSaving] = useState(false)
-  const [error, setError] = useState("")
-  const [success, setSuccess] = useState("")
+  const router = useRouter();
+  const [formData, setFormData] = useState<ProfileForm>(emptyForm);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
   useEffect(() => {
     const loadProfile = async () => {
-      setIsLoading(true)
-      setError("")
+      setIsLoading(true);
+      setError("");
 
       try {
-        const session = await authService.getSession()
+        const session = await authService.getSession();
 
         if (!session) {
-          router.replace("/sign-in")
-          return
+          router.replace("/sign-in");
+          return;
         }
 
-        const user = await authService.getCurrentUser(session.access_token)
+        const user = await authService.getCurrentUser(session.access_token);
 
         setFormData({
           title: user.title || user.prefix || "",
@@ -64,33 +64,33 @@ export default function ProfilePage() {
           signoff_email: user.signoff_email || "",
           station_name: user.station_name || "",
           station_address: user.station_address || "",
-        })
+        });
       } catch (err: any) {
-        setError(err.message || "Failed to load profile")
+        setError(err.message || "Failed to load profile");
       } finally {
-        setIsLoading(false)
+        setIsLoading(false);
       }
-    }
+    };
 
-    loadProfile()
-  }, [router])
+    loadProfile();
+  }, [router]);
 
   const handleChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
   ) => {
-    const { name, value } = e.target
-    setFormData((prev) => ({ ...prev, [name]: value }))
-  }
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
+    e.preventDefault();
 
-    setError("")
-    setSuccess("")
-    setIsSaving(true)
+    setError("");
+    setSuccess("");
+    setIsSaving(true);
 
     try {
-      const token = await authService.getValidAccessToken()
+      const token = await authService.getValidAccessToken();
 
       const updates: Partial<User> = {
         prefix: formData.title || undefined,
@@ -103,17 +103,17 @@ export default function ProfilePage() {
         signoff_email: formData.signoff_email || undefined,
         station_name: formData.station_name || undefined,
         station_address: formData.station_address || undefined,
-      }
+      };
 
-      await authService.updateProfile(token, updates)
+      await authService.updateProfile(token, updates);
 
-      setSuccess("Profile updated successfully.")
+      setSuccess("Profile updated successfully.");
     } catch (err: any) {
-      setError(err.message || "Failed to update profile")
+      setError(err.message || "Failed to update profile");
     } finally {
-      setIsSaving(false)
+      setIsSaving(false);
     }
-  }
+  };
 
   return (
     <div className="min-h-screen bg-background flex flex-col items-center px-4 py-8">
@@ -128,7 +128,8 @@ export default function ProfilePage() {
 
           <Link
             href="/dashboard"
-            className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
+            className="inline-flex items-center gap-2 text-sm font-medium text-sky-600 transition-colors hover:text-sky-700"
+            aria-label="Back to dashboard"
           >
             <ArrowLeft className="w-4 h-4" />
             Back to dashboard
@@ -141,14 +142,14 @@ export default function ProfilePage() {
         >
           {error && (
             <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 flex gap-3 items-start">
-              <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+              <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
               <p className="text-sm text-red-500">{error}</p>
             </div>
           )}
 
           {success && (
             <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/20 flex gap-3 items-start">
-              <CheckCircle className="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" />
+              <CheckCircle className="w-5 h-5 text-green-500 shrink-0 mt-0.5" />
               <p className="text-sm text-green-600">{success}</p>
             </div>
           )}
@@ -228,9 +229,9 @@ export default function ProfilePage() {
             </div>
 
             <div className="space-y-2">
-            <label className="block text-sm font-medium">
-              County <span className="text-red-500">*</span>
-            </label>
+              <label className="block text-sm font-medium">
+                County <span className="text-red-500">*</span>
+              </label>
 
               <input
                 type="text"
@@ -323,5 +324,5 @@ export default function ProfilePage() {
         </form>
       </div>
     </div>
-  )
+  );
 }

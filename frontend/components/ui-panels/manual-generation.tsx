@@ -1,48 +1,44 @@
-"use client"
+"use client";
 
-import { useEffect, useRef, useState } from "react"
-import Link from "next/link"
-import { ChevronLeft, Download, RefreshCw } from "lucide-react"
-import { motion } from "framer-motion"
-import { LogViewer } from "@/components/log-viewer"
+import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { Download, RefreshCw } from "lucide-react";
+import { motion } from "framer-motion";
+import { LogViewer } from "@/components/log-viewer";
 import {
   formatWeeklyReportWindow,
   getCurrentWeeklyReportWindow,
-} from "@/lib/utils/report_date"
-import { authService } from "@/lib/services/authService"
-import { workflowService } from "@/lib/services/workflowService"
-import { ReportService } from "@/lib/services/reportService"
-import type { ValidationResponse, MapOutput } from "@/lib/models/workflow"
-import type { User } from "@/lib/models/auth"
-import { useRouter } from "next/navigation"
+} from "@/lib/utils/report_date";
+import { authService } from "@/lib/services/authService";
+import { workflowService } from "@/lib/services/workflowService";
+import { ReportService } from "@/lib/services/reportService";
+import type { ValidationResponse, MapOutput } from "@/lib/models/workflow";
+import type { User } from "@/lib/models/auth";
+import { useRouter } from "next/navigation";
 
-interface ManualGenerationProps {
-  onBack: () => void
-}
-
-const REPORT_JOB_ACTIVE_KEY = "report_job_active"
-const PROFILE_REDIRECT_DELAY_MS = 3200 as const
+const REPORT_JOB_ACTIVE_KEY = "report_job_active";
+const PROFILE_REDIRECT_DELAY_MS = 3200 as const;
 
 const isBlank = (value?: string | null): boolean => {
-  if (value === null || value === undefined) return true
+  if (value === null || value === undefined) return true;
   if (typeof value === "string") {
-    return value.trim().length === 0
+    return value.trim().length === 0;
   }
-  return false
-}
+  return false;
+};
 
 const getPersonalEmail = (user: User | null): string | undefined => {
   if (!user?.email) {
-    return undefined
+    return undefined;
   }
 
-  const trimmed = user.email.trim()
-  return trimmed ? trimmed : undefined
-}
+  const trimmed = user.email.trim();
+  return trimmed ? trimmed : undefined;
+};
 
 const getMissingProfileFields = (user: User | null): string[] => {
-  const personalEmail = getPersonalEmail(user)
-  const workEmail = user?.signoff_email
+  const personalEmail = getPersonalEmail(user);
+  const workEmail = user?.signoff_email;
 
   const required = [
     ["Title", user?.prefix || user?.title],
@@ -54,182 +50,188 @@ const getMissingProfileFields = (user: User | null): string[] => {
     ["Work Email", workEmail],
     ["Station Name", user?.station_name],
     ["Station Address", user?.station_address],
-  ]
+  ];
 
-  return required
-    .filter(([, value]) => isBlank(value))
-    .map(([label]) => label)
-}
+  return required.filter(([, value]) => isBlank(value)).map(([label]) => label);
+};
 
 const getErrorMessage = (error: unknown, fallback: string): string => {
-  if (error instanceof Error && error.message) return error.message
-  if (typeof error === "string" && error.trim()) return error
-  return fallback
-}
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "string" && error.trim()) return error;
+  return fallback;
+};
 
-export function ManualGeneration({ onBack }: ManualGenerationProps) {
+export function ManualGeneration() {
   // ===== WORKFLOW STATE =====
-  const [step, setStep] = useState(1)
-  const totalSteps = 4
+  const [step, setStep] = useState(1);
+  const totalSteps = 4;
 
-  const [userCounty, setUserCounty] = useState("")
-  const [availableVars, setAvailableVars] = useState<string[]>([])
-  const [selectedVars, setSelectedVars] = useState<string[]>([])
-  const [logs, setLogs] = useState<string[]>([])
-  const [validationResult, setValidationResult] = useState<ValidationResponse | null>(null)
-  const [generatedMaps, setGeneratedMaps] = useState<MapOutput[]>([])
+  const [userCounty, setUserCounty] = useState("");
+  const [availableVars, setAvailableVars] = useState<string[]>([]);
+  const [selectedVars, setSelectedVars] = useState<string[]>([]);
+  const [logs, setLogs] = useState<string[]>([]);
+  const [validationResult, setValidationResult] =
+    useState<ValidationResponse | null>(null);
+  const [generatedMaps, setGeneratedMaps] = useState<MapOutput[]>([]);
 
-  const [isGenerating, setIsGenerating] = useState(false)
-  const [isComplete, setIsComplete] = useState(false)
-  const [downloadUrl, setDownloadUrl] = useState("")
-  const [downloadReportId, setDownloadReportId] = useState("")
-  const [errorMessage, setErrorMessage] = useState("")
-  const [sessionToken, setSessionToken] = useState<string | null>(null)
-  const [profileUser, setProfileUser] = useState<User | null>(null)
-  const [missingProfileFields, setMissingProfileFields] = useState<string[]>([])
-  const profileRedirectRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const reportPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const router = useRouter()
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isComplete, setIsComplete] = useState(false);
+  const [downloadUrl, setDownloadUrl] = useState("");
+  const [downloadReportId, setDownloadReportId] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
+  const [sessionToken, setSessionToken] = useState<string | null>(null);
+  const [profileUser, setProfileUser] = useState<User | null>(null);
+  const [missingProfileFields, setMissingProfileFields] = useState<string[]>(
+    [],
+  );
+  const profileRedirectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reportPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const router = useRouter();
 
-  const reportWindow = getCurrentWeeklyReportWindow()
-  const countyLabel = userCounty.trim()
-  const isCountyMissing = !countyLabel
+  const reportWindow = getCurrentWeeklyReportWindow();
+  const countyLabel = userCounty.trim();
+  const isCountyMissing = !countyLabel;
 
   // ===== HELPER: Format date to ISO string (YYYY-MM-DD) =====
   const formatDateToISO = (date: Date): string => {
-    return date.toISOString().split('T')[0] // "2026-03-23"
-  }
+    return date.toISOString().split("T")[0]; // "2026-03-23"
+  };
 
   useEffect(() => {
-    let isMounted = true
+    let isMounted = true;
 
     const loadSession = async () => {
-      const session = await authService.getSession()
-      if (!isMounted) return
+      const session = await authService.getSession();
+      if (!isMounted) return;
 
       if (session?.user) {
-        setUserCounty(session.user.county || "")
-        setSessionToken(session.access_token)
-        setProfileUser(session.user)
+        setUserCounty(session.user.county || "");
+        setSessionToken(session.access_token);
+        setProfileUser(session.user);
 
         try {
-          const refreshed = await authService.getCurrentUser(session.access_token)
-          if (!isMounted) return
-          setProfileUser(refreshed)
+          const refreshed = await authService.getCurrentUser(
+            session.access_token,
+          );
+          if (!isMounted) return;
+          setProfileUser(refreshed);
         } catch (err) {
-          console.error("Failed to refresh profile data:", err)
+          console.error("Failed to refresh profile data:", err);
         }
       }
-    }
+    };
 
-    void loadSession()
+    void loadSession();
     return () => {
       if (reportPollRef.current) {
-        clearInterval(reportPollRef.current)
-        reportPollRef.current = null
+        clearInterval(reportPollRef.current);
+        reportPollRef.current = null;
       }
       if (profileRedirectRef.current) {
-        clearTimeout(profileRedirectRef.current)
-        profileRedirectRef.current = null
+        clearTimeout(profileRedirectRef.current);
+        profileRedirectRef.current = null;
       }
-    }
-  }, [])
+    };
+  }, []);
 
   useEffect(() => {
     if (!profileUser) {
-      setMissingProfileFields([])
-      return
+      setMissingProfileFields([]);
+      return;
     }
 
-    setMissingProfileFields(getMissingProfileFields(profileUser))
-  }, [profileUser])
+    setMissingProfileFields(getMissingProfileFields(profileUser));
+  }, [profileUser]);
 
   // ===== LOG HELPER =====
   const addLog = (msg: string) => {
-    setLogs((prev) => [
-      ...prev,
-      `[${new Date().toLocaleTimeString()}] ${msg}`,
-    ])
-  }
+    setLogs((prev) => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
+  };
 
   // ===== STEP 1: PREPARE DATA + CSV ARTIFACTS =====
   const handleValidate = async () => {
     if (!sessionToken) {
-      setErrorMessage("No active session")
-      return
+      setErrorMessage("No active session");
+      return;
     }
     if (missingProfileFields.length > 0) {
-      const fieldList = missingProfileFields.join(", ")
-      const profileError =
-        `Complete your profile (${fieldList}) before generating a report. Redirecting you to the profile page...`
-      addLog(`✗ Validation blocked: ${profileError}`)
-      setErrorMessage(profileError)
+      const fieldList = missingProfileFields.join(", ");
+      const profileError = `Complete your profile (${fieldList}) before generating a report. Redirecting you to the profile page...`;
+      addLog(`✗ Validation blocked: ${profileError}`);
+      setErrorMessage(profileError);
       if (profileRedirectRef.current) {
-        clearTimeout(profileRedirectRef.current)
+        clearTimeout(profileRedirectRef.current);
       }
       profileRedirectRef.current = setTimeout(() => {
-        router.push("/profile")
-      }, PROFILE_REDIRECT_DELAY_MS)
-      return
+        router.push("/profile");
+      }, PROFILE_REDIRECT_DELAY_MS);
+      return;
     }
 
-    addLog(`Stage 1: Aggregating and preparing CSVs for Week ${reportWindow.week}, ${reportWindow.year}…`)
-    setIsGenerating(true)
-    setErrorMessage("")
+    addLog(
+      `Stage 1: Aggregating and preparing CSVs for Week ${reportWindow.week}, ${reportWindow.year}…`,
+    );
+    setIsGenerating(true);
+    setErrorMessage("");
 
     try {
-      const result = await workflowService.validateInputs(
-        sessionToken,
-        {
-          report_week: reportWindow.week,
-          report_year: reportWindow.year,
-          report_start_at: formatDateToISO(reportWindow.start),
-          report_end_at: formatDateToISO(reportWindow.end)
-        }
-      )
+      const result = await workflowService.validateInputs(sessionToken, {
+        report_week: reportWindow.week,
+        report_year: reportWindow.year,
+        report_start_at: formatDateToISO(reportWindow.start),
+        report_end_at: formatDateToISO(reportWindow.end),
+      });
 
-      setValidationResult(result)
+      setValidationResult(result);
       const rainfallOnly = result.variables.filter(
-        (v) => String(v).trim().toLowerCase() === "rainfall"
-      )
-      setAvailableVars(rainfallOnly)
-      setSelectedVars([])
-      setStep(2)
+        (v) => String(v).trim().toLowerCase() === "rainfall",
+      );
+      setAvailableVars(rainfallOnly);
+      setSelectedVars([]);
+      setStep(2);
 
-      addLog(`✓ Files found: ${result.observation_file}, ${result.shapefile}`)
-      addLog(`✓ Map variables ready: ${result.variables.join(", ")}`)
-      addLog(`✓ Report period: Week ${result.report_week}, ${result.report_year}`)
-      addLog(`✓ Period dates: ${result.report_period.start} to ${result.report_period.end}`)
-      addLog(`✓ File stats: ${result.row_count} rows, ${result.column_count} columns`)
+      addLog(`✓ Files found: ${result.observation_file}, ${result.shapefile}`);
+      addLog(`✓ Map variables ready: ${result.variables.join(", ")}`);
+      addLog(
+        `✓ Report period: Week ${result.report_week}, ${result.report_year}`,
+      );
+      addLog(
+        `✓ Period dates: ${result.report_period.start} to ${result.report_period.end}`,
+      );
+      addLog(
+        `✓ File stats: ${result.row_count} rows, ${result.column_count} columns`,
+      );
       if (result.prepared_observation_csv_path) {
-        addLog(`✓ Prepared station CSV saved: ${result.prepared_observation_csv_path}`)
+        addLog(
+          `✓ Prepared station CSV saved: ${result.prepared_observation_csv_path}`,
+        );
       }
       if (result.prepared_map_csv_path) {
-        addLog(`✓ Prepared map CSV saved: ${result.prepared_map_csv_path}`)
+        addLog(`✓ Prepared map CSV saved: ${result.prepared_map_csv_path}`);
       }
-      addLog("Stage 1 complete")
+      addLog("Stage 1 complete");
     } catch (error: unknown) {
-      const errorMsg = getErrorMessage(error, "Validation failed")
-      addLog(`✗ Validation failed: ${errorMsg}`)
-      setErrorMessage(errorMsg)
+      const errorMsg = getErrorMessage(error, "Validation failed");
+      addLog(`✗ Validation failed: ${errorMsg}`);
+      setErrorMessage(errorMsg);
     } finally {
-      setIsGenerating(false)
+      setIsGenerating(false);
     }
-  }
+  };
 
   // ===== STEP 2: VARIABLE SELECT =====
   const handleNextToMaps = () => {
-    addLog(`Variables selected: ${selectedVars.join(", ")}`)
-    setStep(3)
-  }
+    addLog(`Variables selected: ${selectedVars.join(", ")}`);
+    setStep(3);
+  };
 
   // ===== STEP 3: MAP GENERATION (USING WORKFLOW SERVICE) =====
   const handleGenerateMaps = async () => {
-    if (!sessionToken) return
+    if (!sessionToken) return;
 
-    addLog("Stage 3: Generating maps…")
-    setIsGenerating(true)
-    setErrorMessage("")
+    addLog("Stage 3: Generating maps…");
+    setIsGenerating(true);
+    setErrorMessage("");
 
     try {
       const result = await workflowService.generateMaps(sessionToken, {
@@ -238,155 +240,161 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
         report_week: reportWindow.week,
         report_year: reportWindow.year,
         report_start_at: formatDateToISO(reportWindow.start),
-        report_end_at: formatDateToISO(reportWindow.end)
-      })
+        report_end_at: formatDateToISO(reportWindow.end),
+      });
 
-      setGeneratedMaps(result.outputs)
+      setGeneratedMaps(result.outputs);
 
       result.outputs.forEach((map: MapOutput) =>
-        addLog(`✓ Map ready: ${map.variable}`)
-      )
+        addLog(`✓ Map ready: ${map.variable}`),
+      );
 
-      setStep(4)
-      addLog("Stage 3 complete")
+      setStep(4);
+      addLog("Stage 3 complete");
     } catch (error: unknown) {
-      const errorMsg = getErrorMessage(error, "Map generation failed")
-      addLog(`✗ Map generation failed: ${errorMsg}`)
-      setErrorMessage(errorMsg)
+      const errorMsg = getErrorMessage(error, "Map generation failed");
+      addLog(`✗ Map generation failed: ${errorMsg}`);
+      setErrorMessage(errorMsg);
     } finally {
-      setIsGenerating(false)
+      setIsGenerating(false);
     }
-  }
+  };
 
   // ===== STEP 4: REPORT GENERATION (USING WORKFLOW SERVICE) =====
   const handleGenerateReport = async () => {
     if (!sessionToken) {
-      const errorMsg = !sessionToken ? "No active session" : "No active reporting period"
-      addLog(`✗ Report generation blocked: ${errorMsg}`)
-      setErrorMessage(errorMsg)
-      return
+      const errorMsg = !sessionToken
+        ? "No active session"
+        : "No active reporting period";
+      addLog(`✗ Report generation blocked: ${errorMsg}`);
+      setErrorMessage(errorMsg);
+      return;
     }
 
     if (isCountyMissing) {
       const countyErrorMsg =
-        "County information is missing from your profile. Update it before generating the report."
-      addLog(`✗ Report generation blocked: ${countyErrorMsg}`)
-      setErrorMessage(countyErrorMsg)
-      return
+        "County information is missing from your profile. Update it before generating the report.";
+      addLog(`✗ Report generation blocked: ${countyErrorMsg}`);
+      setErrorMessage(countyErrorMsg);
+      return;
     }
 
-    addLog("Stage 4: Starting report generation workflow…")
-    setIsGenerating(true)
-    setErrorMessage("")
+    addLog("Stage 4: Starting report generation workflow…");
+    setIsGenerating(true);
+    setErrorMessage("");
 
     try {
-      setIsComplete(false)
-      setDownloadUrl("")
-      setDownloadReportId("")
-      const startResult = await workflowService.generateReportAsync(sessionToken, {
-        county_name: userCounty,
-        week_number: reportWindow.week,
-        year: reportWindow.year,
-        report_start_at: formatDateToISO(reportWindow.start),
-        report_end_at: formatDateToISO(reportWindow.end),
-        variables: selectedVars
-      })
-      const runStartedAt = Date.now()
-      addLog(`… ${startResult.message}`)
-      addLog("… Monitoring background generation progress")
+      setIsComplete(false);
+      setDownloadUrl("");
+      setDownloadReportId("");
+      const startResult = await workflowService.generateReportAsync(
+        sessionToken,
+        {
+          county_name: userCounty,
+          week_number: reportWindow.week,
+          year: reportWindow.year,
+          report_start_at: formatDateToISO(reportWindow.start),
+          report_end_at: formatDateToISO(reportWindow.end),
+          variables: selectedVars,
+        },
+      );
+      const runStartedAt = Date.now();
+      addLog(`… ${startResult.message}`);
+      addLog("… Monitoring background generation progress");
       if (typeof window !== "undefined") {
-        sessionStorage.setItem(REPORT_JOB_ACTIVE_KEY, "true")
+        sessionStorage.setItem(REPORT_JOB_ACTIVE_KEY, "true");
       }
 
       if (reportPollRef.current) {
-        clearInterval(reportPollRef.current)
+        clearInterval(reportPollRef.current);
       }
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      const baseUrl =
+        process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
       const pollStatus = async () => {
         try {
           const status = (await workflowService.getWorkflowStatus(
             sessionToken,
             reportWindow.week,
-            reportWindow.year
-          )) as any
-          if (!status) return
-          const latestLog = status.latest_log
+            reportWindow.year,
+          )) as any;
+          if (!status) return;
+          const latestLog = status.latest_log;
           const latestLogTs = latestLog?.created_at
             ? new Date(latestLog.created_at).getTime()
-            : 0
+            : 0;
 
           // Ignore stale completion records from a prior run.
           if (status.generated_report_id && latestLogTs >= runStartedAt) {
-            const pdfPath = `/api/v1/reports/download/${status.generated_report_id}`
-            setDownloadUrl(`${baseUrl}${pdfPath}`)
-            setDownloadReportId(status.generated_report_id)
-            setIsComplete(true)
-            setIsGenerating(false)
-            addLog("✓ Report generated in background")
+            const pdfPath = `/api/v1/reports/download/${status.generated_report_id}`;
+            setDownloadUrl(`${baseUrl}${pdfPath}`);
+            setDownloadReportId(status.generated_report_id);
+            setIsComplete(true);
+            setIsGenerating(false);
+            addLog("✓ Report generated in background");
             if (typeof window !== "undefined") {
-              sessionStorage.setItem(REPORT_JOB_ACTIVE_KEY, "false")
+              sessionStorage.setItem(REPORT_JOB_ACTIVE_KEY, "false");
             }
             if (reportPollRef.current) {
-              clearInterval(reportPollRef.current)
-              reportPollRef.current = null
+              clearInterval(reportPollRef.current);
+              reportPollRef.current = null;
             }
-            return
+            return;
           }
 
-          const latestStatus = String(latestLog?.status || "").toLowerCase()
+          const latestStatus = String(latestLog?.status || "").toLowerCase();
           if (latestStatus === "error" || latestStatus === "failed") {
-            setIsGenerating(false)
-            const msg = latestLog?.message || "Background report generation failed"
-            setErrorMessage(msg)
-            addLog(`✗ ${msg}`)
+            setIsGenerating(false);
+            const msg =
+              latestLog?.message || "Background report generation failed";
+            setErrorMessage(msg);
+            addLog(`✗ ${msg}`);
             if (typeof window !== "undefined") {
-              sessionStorage.setItem(REPORT_JOB_ACTIVE_KEY, "false")
+              sessionStorage.setItem(REPORT_JOB_ACTIVE_KEY, "false");
             }
             if (reportPollRef.current) {
-              clearInterval(reportPollRef.current)
-              reportPollRef.current = null
+              clearInterval(reportPollRef.current);
+              reportPollRef.current = null;
             }
           }
         } catch {
           // ignore transient polling errors
         }
-      }
+      };
 
-      reportPollRef.current = setInterval(pollStatus, 4000)
-      await pollStatus()
-
+      reportPollRef.current = setInterval(pollStatus, 4000);
+      await pollStatus();
     } catch (e: any) {
-      const errorMsg = e.message || "Report generation failed"
-      addLog(`✗ Report generation failed: ${errorMsg}`)
-      setErrorMessage(errorMsg)
-      setIsGenerating(false)
+      const errorMsg = e.message || "Report generation failed";
+      addLog(`✗ Report generation failed: ${errorMsg}`);
+      setErrorMessage(errorMsg);
+      setIsGenerating(false);
       if (typeof window !== "undefined") {
-        sessionStorage.setItem(REPORT_JOB_ACTIVE_KEY, "false")
+        sessionStorage.setItem(REPORT_JOB_ACTIVE_KEY, "false");
       }
     }
-  }
+  };
 
   // ===== RESET WORKFLOW =====
   const handleReset = () => {
-    setStep(1)
-    setSelectedVars([])
-    setLogs([])
-    setValidationResult(null)
-    setGeneratedMaps([])
-    setIsComplete(false)
-    setDownloadUrl("")
-    setDownloadReportId("")
-    setErrorMessage("")
+    setStep(1);
+    setSelectedVars([]);
+    setLogs([]);
+    setValidationResult(null);
+    setGeneratedMaps([]);
+    setIsComplete(false);
+    setDownloadUrl("");
+    setDownloadReportId("");
+    setErrorMessage("");
     if (typeof window !== "undefined") {
-      sessionStorage.setItem(REPORT_JOB_ACTIVE_KEY, "false")
+      sessionStorage.setItem(REPORT_JOB_ACTIVE_KEY, "false");
     }
     if (reportPollRef.current) {
-      clearInterval(reportPollRef.current)
-      reportPollRef.current = null
+      clearInterval(reportPollRef.current);
+      reportPollRef.current = null;
     }
-    addLog("Workflow reset")
-  }
+    addLog("Workflow reset");
+  };
 
   // ===== UI =====
   return (
@@ -395,17 +403,7 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
       animate={{ opacity: 1 }}
       className="p-4 sm:p-6 space-y-6 lg:pt-0"
     >
-      {/* BACK BUTTON */}
-      <div className="flex items-center justify-between">
-        <motion.button
-          onClick={onBack}
-          whileHover={{ x: -4 }}
-          className="flex items-center gap-2 text-primary"
-        >
-          <ChevronLeft className="w-4 h-4" />
-          <span className="text-sm">Back to Dashboard</span>
-        </motion.button>
-
+      <div className="flex items-center justify-end">
         {step > 1 && !isComplete && (
           <button
             onClick={handleReset}
@@ -448,13 +446,16 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
                       </p>
                     ) : (
                       <p className="text-[11px] text-muted-foreground">
-                        Pulled from your profile and included on the final forecast.
+                        Pulled from your profile and included on the final
+                        forecast.
                       </p>
                     )}
                   </div>
 
                   <div>
-                    <label className="text-xs font-medium">Reporting Period</label>
+                    <label className="text-xs font-medium">
+                      Reporting Period
+                    </label>
                     <div className="bg-muted border rounded-lg px-3 py-2 text-sm">
                       {reportWindow
                         ? formatWeeklyReportWindow(reportWindow)
@@ -529,7 +530,7 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
                           setSelectedVars((prev) =>
                             prev.includes(v)
                               ? prev.filter((x) => x !== v)
-                              : [...prev, v]
+                              : [...prev, v],
                           )
                         }
                         className="cursor-pointer"
@@ -556,7 +557,9 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
 
                 <ul className="text-sm list-disc ml-4 space-y-1">
                   {selectedVars.map((v) => (
-                    <li key={v} className="capitalize">{v}</li>
+                    <li key={v} className="capitalize">
+                      {v}
+                    </li>
                   ))}
                 </ul>
 
@@ -584,7 +587,10 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
 
                 <ul className="text-sm list-disc ml-4 space-y-1">
                   {generatedMaps.map((map) => (
-                    <li key={map.variable} className="capitalize flex items-center gap-2">
+                    <li
+                      key={map.variable}
+                      className="capitalize flex items-center gap-2"
+                    >
                       <span>{map.variable}</span>
                       <a
                         href={map.map_url}
@@ -608,7 +614,10 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
                 {isCountyMissing && (
                   <p className="mt-2 text-[12px] text-amber-700">
                     County is required to build the report.{" "}
-                    <Link href="/profile" className="font-semibold text-primary underline">
+                    <Link
+                      href="/profile"
+                      className="font-semibold text-primary underline"
+                    >
                       Update your profile
                     </Link>{" "}
                     first to avoid incomplete PDFs.
@@ -621,7 +630,9 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
             {isComplete && (
               <>
                 <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-3 text-center">
-                  <p className="text-sm text-green-600 font-medium">✓ Workflow Complete</p>
+                  <p className="text-sm text-green-600 font-medium">
+                    ✓ Workflow Complete
+                  </p>
                 </div>
 
                 <button
@@ -645,12 +656,24 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
             {/* Validation Summary */}
             {validationResult && step > 1 && (
               <div className="mt-4 bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
-                <p className="text-xs text-blue-600 font-medium mb-1">Preparation Summary</p>
+                <p className="text-xs text-blue-600 font-medium mb-1">
+                  Preparation Summary
+                </p>
                 <p className="text-sm">
-                  <span className="font-medium">File:</span> {validationResult.observation_file}<br />
-                  <span className="font-medium">Variables:</span> {validationResult.variables.join(", ")}<br />
-                  <span className="font-medium">Period:</span> {validationResult.report_period.start} to {validationResult.report_period.end}<br />
-                  <span className="font-medium">Rows:</span> {validationResult.row_count}, <span className="font-medium">Columns:</span> {validationResult.column_count}
+                  <span className="font-medium">File:</span>{" "}
+                  {validationResult.observation_file}
+                  <br />
+                  <span className="font-medium">Variables:</span>{" "}
+                  {validationResult.variables.join(", ")}
+                  <br />
+                  <span className="font-medium">Period:</span>{" "}
+                  {validationResult.report_period.start} to{" "}
+                  {validationResult.report_period.end}
+                  <br />
+                  <span className="font-medium">Rows:</span>{" "}
+                  {validationResult.row_count},{" "}
+                  <span className="font-medium">Columns:</span>{" "}
+                  {validationResult.column_count}
                 </p>
               </div>
             )}
@@ -668,8 +691,12 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
                       rel="noopener noreferrer"
                       className="border border-border rounded-lg p-2 hover:bg-muted transition-colors"
                     >
-                      <p className="text-xs text-center capitalize">{map.variable}</p>
-                      <p className="text-[10px] text-muted-foreground text-center mt-1">Click to view</p>
+                      <p className="text-xs text-center capitalize">
+                        {map.variable}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground text-center mt-1">
+                        Click to view
+                      </p>
                     </a>
                   ))}
                 </div>
@@ -687,18 +714,23 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
             {isComplete && downloadUrl && (
               <div className="mt-6 space-y-3">
                 <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-4">
-                  <p className="text-sm text-green-600 font-medium">✓ Report generated successfully</p>
+                  <p className="text-sm text-green-600 font-medium">
+                    ✓ Report generated successfully
+                  </p>
                 </div>
 
                 <div className="flex gap-3">
                   <button
                     type="button"
                     onClick={async () => {
-                      if (!sessionToken || !downloadReportId) return
+                      if (!sessionToken || !downloadReportId) return;
                       try {
-                        await ReportService.downloadReport(sessionToken, downloadReportId)
+                        await ReportService.downloadReport(
+                          sessionToken,
+                          downloadReportId,
+                        );
                       } catch (e: any) {
-                        setErrorMessage(e?.message || "Failed to download PDF")
+                        setErrorMessage(e?.message || "Failed to download PDF");
                       }
                     }}
                     className="flex-1 bg-primary text-primary-foreground py-2 px-4 rounded-lg text-sm flex items-center justify-center gap-2 hover:bg-primary/90 transition-colors"
@@ -721,5 +753,5 @@ export function ManualGeneration({ onBack }: ManualGenerationProps) {
         </div>
       </div>
     </motion.div>
-  )
+  );
 }
