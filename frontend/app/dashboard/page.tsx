@@ -43,6 +43,17 @@ import { supabase } from "@/lib/supabaseClient";
 type Screen = "dashboard" | "generate" | "archive" | "config" | "upload";
 type LogoutPhase = "idle" | "submitting" | "success";
 type LogoutOverlayPhase = Exclude<LogoutPhase, "idle">;
+type SubscriptionTier = "Free" | "Trial" | "Pro";
+
+const getTierBadgeClass = (tier: SubscriptionTier): string => {
+  if (tier === "Pro") {
+    return "bg-emerald-100 text-emerald-700";
+  }
+  if (tier === "Trial") {
+    return "bg-amber-100 text-amber-700";
+  }
+  return "bg-slate-100 text-slate-600";
+};
 
 const LOGOUT_REDIRECT_DELAY_MS = 1400 as const;
 const LOGOUT_PANEL_CONTENT = {
@@ -109,6 +120,8 @@ export default function Dashboard() {
     null,
   );
   const [logoutPhase, setLogoutPhase] = useState<LogoutPhase>("idle");
+  const [subscriptionTier, setSubscriptionTier] =
+    useState<SubscriptionTier>("Free");
   const logoutRedirectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
   const isLoggingOut = logoutPhase === "submitting";
@@ -172,11 +185,22 @@ export default function Dashboard() {
         const state = await subscriptionService.getMySubscription(token);
         if (cancelled) return;
 
+        if (state.access_status === "subscribed") {
+          setSubscriptionTier("Pro");
+        } else if (state.access_status === "trial_active") {
+          setSubscriptionTier("Trial");
+        } else {
+          setSubscriptionTier("Free");
+        }
+
         if (state.access_status === "payment_required") {
           window.location.replace("/pricing?reason=trial-expired");
         }
       } catch {
         // Keep dashboard usable on transient network errors.
+        if (!cancelled) {
+          setSubscriptionTier("Free");
+        }
       }
     };
 
@@ -406,7 +430,7 @@ export default function Dashboard() {
                 <div ref={userMenuRef} className="relative">
                   <button
                     onClick={() => setUserMenuOpen((s) => !s)}
-                    className="group flex items-center gap-2 rounded-full border border-border bg-background px-2 py-1.5 transition-all hover:border-sky-600/50 hover:shadow-sm"
+                    className="group flex items-center gap-2.5 rounded-full border border-border bg-background px-2.5 py-1.5 transition-all hover:border-sky-600/50 hover:shadow-sm"
                     aria-expanded={userMenuOpen}
                     aria-haspopup="menu"
                   >
@@ -414,8 +438,13 @@ export default function Dashboard() {
                       {getAvatarLabel(sessionUser)}
                     </span>
                     <span className="hidden text-left md:flex md:flex-col md:leading-tight">
-                      <span className="text-xs font-semibold text-foreground">
-                        {getDisplayName(sessionUser)}
+                      <span className="flex items-center gap-2 text-xs font-semibold text-foreground">
+                        <span>{getDisplayName(sessionUser)}</span>
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${getTierBadgeClass(subscriptionTier)}`}
+                        >
+                          {subscriptionTier}
+                        </span>
                       </span>
                       <span className="max-w-44 truncate text-[11px] text-muted-foreground">
                         {sessionUser?.email || "Account"}
@@ -427,19 +456,26 @@ export default function Dashboard() {
                   {/* Dropdown */}
                   {userMenuOpen && (
                     <div className="absolute right-0 top-[calc(100%+0.6rem)] z-50 w-64 overflow-hidden rounded-2xl border border-border bg-card/95 shadow-xl backdrop-blur">
-                      <div className="border-b border-border/70 px-4 py-3">
-                        <p className="text-sm font-semibold text-foreground">
-                          {getDisplayName(sessionUser)}
-                        </p>
+                      <div className="border-b border-border/70 px-4 py-3.5">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-semibold text-foreground">
+                            {getDisplayName(sessionUser)}
+                          </p>
+                          <span
+                            className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${getTierBadgeClass(subscriptionTier)}`}
+                          >
+                            {subscriptionTier}
+                          </span>
+                        </div>
                         <p className="truncate text-xs text-muted-foreground">
                           {sessionUser?.email || "No email"}
                         </p>
                       </div>
 
-                      <div className="p-2">
+                      <div className="space-y-1.5 p-2.5">
                         <Link
                           href="/profile"
-                          className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
+                          className="flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm text-foreground transition-colors hover:bg-muted"
                           onClick={() => setUserMenuOpen(false)}
                         >
                           <UserCircle2 className="h-4 w-4 text-muted-foreground" />
@@ -448,7 +484,7 @@ export default function Dashboard() {
                         <button
                           onClick={handleLogout}
                           disabled={isLoggingOut}
-                          className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                          className="flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           <LogOut className="h-4 w-4" />
                           {isLoggingOut ? "Logging out..." : "Log out"}

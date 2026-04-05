@@ -140,6 +140,13 @@ def get_user_access_state(supabase_admin, user: Any) -> Dict[str, Any]:
 
     subscription = sub_rows[0] if sub_rows else None
     latest_payment = payment_rows[0] if payment_rows else None
+    if latest_payment:
+        latest_payment = {
+            **latest_payment,
+            "payment_id": str(latest_payment.get("id") or ""),
+            "order_tracking_id": latest_payment.get("confirmation_code")
+            or latest_payment.get("order_tracking_id"),
+        }
     profile = profile_rows[0] if profile_rows else {}
 
     trial_state = _compute_trial_state(profile)
