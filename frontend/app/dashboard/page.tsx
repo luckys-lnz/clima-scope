@@ -55,7 +55,7 @@ const getTierBadgeClass = (tier: SubscriptionTier): string => {
   return "bg-slate-100 text-slate-600";
 };
 
-const LOGOUT_REDIRECT_DELAY_MS = 1400 as const;
+const LOGOUT_REDIRECT_DELAY_MS = 500 as const;
 const LOGOUT_PANEL_CONTENT = {
   submitting: {
     icon: LogOut,
